@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.4
+
+### Patch Changes
+
+- a2c896d: Limit re-paints
+
 ## 1.0.3
 
 ### Patch Changes
