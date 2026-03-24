@@ -1,1 +1,1 @@
-export { Carousel } from './Carousel.js';
+export { Carousel } from "./Carousel.js";

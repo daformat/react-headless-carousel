@@ -17,9 +17,7 @@ import {
   useState,
 } from "react";
 
-import type {MaybeNull, MaybeUndefined} from "./utils/maybe.js"
-
-
+import type { MaybeNull, MaybeUndefined } from "./utils/maybe.js";
 
 /**
  * Use a fixed frame duration so that we can accurately predict snapping and
@@ -61,7 +59,7 @@ type ScrollState = {
 type ScrollIntoView = (
   target: HTMLElement,
   container: HTMLElement,
-  direction: "forwards" | "backwards" | "nearest"
+  direction: "forwards" | "backwards" | "nearest",
 ) => void;
 
 type CarouselContext = {
@@ -142,7 +140,7 @@ type CarouselRootProps = {
 const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
   (
     { boundaryOffset = defaultBoundaryOffset, children, ...props },
-    forwardedRef
+    forwardedRef,
   ) => {
     const [ref, setRef] = useState<RefObject<MaybeNull<HTMLElement>>>({
       current: null,
@@ -175,7 +173,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       }
       container.style.removeProperty(CSS_VARS.overscrollTranslateX);
       const allItems = container.querySelectorAll(
-        ":scope [data-carousel-content] > *"
+        ":scope [data-carousel-content] > *",
       );
       allItems.forEach((item) => {
         if (item instanceof HTMLElement) {
@@ -191,7 +189,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       (
         direction: "forwards" | "backwards",
         container: HTMLElement,
-        items: HTMLElement[]
+        items: HTMLElement[],
       ) => {
         const currentScroll = container.scrollLeft;
         const offset = rootRef.current
@@ -207,7 +205,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
             const nextItem = items.find(
               (item) =>
                 item.offsetLeft + item.offsetWidth >
-                currentScroll + container.offsetWidth - offset
+                currentScroll + container.offsetWidth - offset,
             );
             if (
               nextItem &&
@@ -235,11 +233,11 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         const maxScroll = container.scrollWidth - container.clientWidth;
         const nextScrollPosition = Math.max(
           0,
-          Math.min(scrollPosition, maxScroll)
+          Math.min(scrollPosition, maxScroll),
         );
         container.scrollTo({ left: nextScrollPosition, behavior: "smooth" });
       },
-      [boundaryOffset]
+      [boundaryOffset],
     );
 
     /**
@@ -256,7 +254,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         container.scrollTo({ left: currentScroll, behavior: "instant" });
         return snappedScrollPosition;
       },
-      [scrollStateRef]
+      [scrollStateRef],
     );
 
     /**
@@ -266,7 +264,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       (
         targetScroll: number,
         container: HTMLElement,
-        behavior: ScrollToOptions["behavior"] = "smooth"
+        behavior: ScrollToOptions["behavior"] = "smooth",
       ) => {
         const snappedScroll = snapScroll(targetScroll, container);
         // request animation frame to prevent Safari from being Safari
@@ -277,7 +275,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           });
         });
       },
-      [snapScroll]
+      [snapScroll],
     );
 
     /**
@@ -341,11 +339,11 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           container.scrollTo({ left: currentScroll, behavior: "instant" });
           snappedScrollTo(
             scrollPosition <= offset ? 0 : scrollPosition,
-            container
+            container,
           );
         }
       },
-      [boundaryOffset, scrollStateRef, snappedScrollTo]
+      [boundaryOffset, scrollStateRef, snappedScrollTo],
     );
 
     /**
@@ -377,7 +375,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         }
         snappedScrollTo(scrollPosition, container);
       },
-      [boundaryOffset, clearAnimation, scrollIntoViewNearest, snappedScrollTo]
+      [boundaryOffset, clearAnimation, scrollIntoViewNearest, snappedScrollTo],
     );
 
     /**
@@ -391,7 +389,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         container.style.scrollSnapType =
           scrollStateRef?.current?.scrollSnapType ?? "";
         const items = Array.from(
-          container.querySelectorAll(":scope [data-carousel-content] > *")
+          container.querySelectorAll(":scope [data-carousel-content] > *"),
         ) as HTMLElement[];
         if (items.length === 1) {
           handleScrollPage("forwards", container, items);
@@ -438,7 +436,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         container.style.scrollSnapType =
           scrollStateRef?.current?.scrollSnapType ?? "";
         const items = Array.from(
-          container.querySelectorAll(":scope [data-carousel-content] > *")
+          container.querySelectorAll(":scope [data-carousel-content] > *"),
         ) as HTMLElement[];
         if (items.length === 1) {
           handleScrollPage("backwards", container, items);
@@ -517,7 +515,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         </div>
       </CarouselContext.Provider>
     );
-  }
+  },
 );
 
 CarouselRoot.displayName = "Carousel.Root";
@@ -554,7 +552,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       className,
       ...props
     },
-    forwardedRef
+    forwardedRef,
   ) => {
     const {
       setRef,
@@ -610,8 +608,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         const translateX = Math.ceil(
           parseFloat(
             container.style.getPropertyValue(CSS_VARS.overscrollTranslateX) ??
-              "0"
-          )
+              "0",
+          ),
         );
         const containerScrollWidth =
           (container.scrollWidth ?? 0) - (translateX > 0 ? translateX : 0);
@@ -640,11 +638,11 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         setRemainingBackwards(remainingBackwards);
         root.style.setProperty(
           CSS_VARS.remainingForwards,
-          `${remainingForwards}px`
+          `${remainingForwards}px`,
         );
         root.style.setProperty(
           CSS_VARS.remainingBackwards,
-          `${remainingBackwards}px`
+          `${remainingBackwards}px`,
         );
       }
     }, [
@@ -732,7 +730,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         event.stopPropagation();
         onPointerDown?.(event);
       },
-      [onPointerDown]
+      [onPointerDown],
     );
 
     /**
@@ -753,7 +751,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       (container: HTMLDivElement, scrollDelta: number) => {
         const state = scrollStateRef.current;
         const items = container.querySelectorAll(
-          ":scope [data-carousel-content] > *"
+          ":scope [data-carousel-content] > *",
         );
         const maxDistance = container.offsetWidth / 3;
         const maxScrollLeft = container.scrollWidth - container.offsetWidth;
@@ -762,13 +760,13 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           targetScrollLeft < 0
             ? Math.abs(targetScrollLeft)
             : targetScrollLeft > maxScrollLeft
-            ? targetScrollLeft - maxScrollLeft
-            : 0;
+              ? targetScrollLeft - maxScrollLeft
+              : 0;
         const sign = Math.sign(scrollDelta);
         const easedDistance = iOSRubberBand(overscroll, 0, maxDistance);
         container.style.setProperty(
           CSS_VARS.overscrollTranslateX,
-          `${-sign * easedDistance}px`
+          `${-sign * easedDistance}px`,
         );
         items.forEach((item) => {
           // we have to translate the items instead of the content because
@@ -782,10 +780,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           -sign *
           Math.max(
             easedDistance / RUBBER_BAND_BOUNCE_COEFFICIENT,
-            Math.abs(state.velocityX)
+            Math.abs(state.velocityX),
           );
       },
-      []
+      [],
     );
 
     /**
@@ -829,7 +827,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }
         onPointerMove?.(event);
       },
-      [applyRubberBanding, clampVelocity, onPointerMove]
+      [applyRubberBanding, clampVelocity, onPointerMove],
     );
 
     /**
@@ -843,7 +841,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         initialScroll: number,
         tFinalScroll: number,
         decelerationFactor: number,
-        minVelocity: number
+        minVelocity: number,
       ) => {
         const state = scrollStateRef.current;
 
@@ -858,7 +856,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           initialScroll,
           state.velocityX,
           decelerationFactor,
-          minVelocity
+          minVelocity,
         );
 
         // update velocity to ensure momentum snaps to the correct position and
@@ -880,10 +878,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         return findDecelerationFactor(
           initialScroll,
           snappedScroll,
-          state.velocityX
+          state.velocityX,
         );
       },
-      []
+      [],
     );
 
     /**
@@ -908,7 +906,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           initialScroll,
           state.velocityX,
           decelerationFactor,
-          minVelocity
+          minVelocity,
         );
 
         if (
@@ -923,13 +921,13 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
             initialScroll,
             finalScroll,
             decelerationFactor,
-            minVelocity
+            minVelocity,
           );
         }
 
         return decelerationFactor;
       },
-      [applyMomentumSnapping]
+      [applyMomentumSnapping],
     );
 
     /**
@@ -944,7 +942,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       const minVelocity = 0.00001;
       const decelerationFactor = computeMomentumDecelerationFactor(
         container,
-        minVelocity
+        minVelocity,
       );
 
       const animate = () => {
@@ -980,11 +978,11 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
               Math.sign(theoreticalTranslate) *
               Math.min(
                 Math.abs(theoreticalTranslate),
-                container2.offsetWidth / 2
+                container2.offsetWidth / 2,
               );
             container2.style.setProperty(
               CSS_VARS.overscrollTranslateX,
-              `${clampedTranslate}px`
+              `${clampedTranslate}px`,
             );
             items.forEach((item) => {
               if (item instanceof HTMLElement) {
@@ -1027,12 +1025,12 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           state.initialPointerPosition &&
           Math.hypot(
             state.initialPointerPosition.x - event.clientX,
-            state.initialPointerPosition.y - event.clientY
+            state.initialPointerPosition.y - event.clientY,
           ) < 3
         ) {
           state.isDispatchingClick = true;
           state.initialTarget?.dispatchEvent(
-            new MouseEvent("click", { bubbles: true, cancelable: true })
+            new MouseEvent("click", { bubbles: true, cancelable: true }),
           );
           state.isDispatchingClick = false;
         }
@@ -1045,7 +1043,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }
         onPointerUp?.(event);
       },
-      [onPointerUp, startMomentumAnimation]
+      [onPointerUp, startMomentumAnimation],
     );
 
     useEffect(() => {
@@ -1076,7 +1074,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           lastTabScrollLeft.current = null;
         }
       },
-      [scrollIntoView]
+      [scrollIntoView],
     );
 
     useEffect(() => {
@@ -1132,10 +1130,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           scrollsForwards && scrollsBackwards
             ? "both"
             : scrollsForwards
-            ? "forwards"
-            : scrollsBackwards
-            ? "backwards"
-            : "none"
+              ? "forwards"
+              : scrollsBackwards
+                ? "backwards"
+                : "none"
         }
         className={className}
         style={
@@ -1172,7 +1170,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         {children}
       </div>
     );
-  }
+  },
 );
 
 CarouselViewport.displayName = "Carousel.Viewport";
@@ -1191,7 +1189,7 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
         {children}
       </div>
     );
-  }
+  },
 );
 CarouselContent.displayName = "Carousel.Content";
 
@@ -1219,7 +1217,7 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
         {children}
       </div>
     );
-  }
+  },
 );
 
 CarouselItem.displayName = "Carousel.Item";
@@ -1243,7 +1241,7 @@ const CarouselNextPage = forwardRef<HTMLButtonElement, CarouselNextPageProps>(
         {children}
       </button>
     );
-  }
+  },
 );
 
 CarouselNextPage.displayName = "Carousel.NextPage";
@@ -1268,7 +1266,7 @@ const CarouselPrevPage = forwardRef<HTMLButtonElement, CarouselPrevPageProps>(
         {children}
       </button>
     );
-  }
+  },
 );
 
 CarouselPrevPage.displayName = "Carousel.PrevPage";
@@ -1278,11 +1276,11 @@ CarouselPrevPage.displayName = "Carousel.PrevPage";
  */
 const getBoundaryOffset = (
   boundaryOffset: CarouselContext["boundaryOffset"],
-  root: HTMLElement
+  root: HTMLElement,
 ) => {
   return typeof boundaryOffset === "function"
     ? boundaryOffset(root)
-    : boundaryOffset ?? { x: 0, y: 0 };
+    : (boundaryOffset ?? { x: 0, y: 0 });
 };
 
 /**
@@ -1310,7 +1308,7 @@ const getScrollSnapAlign = (computedStyle: MaybeNull<CSSStyleDeclaration>) => {
 const findDecelerationFactor = (
   initialScroll: number,
   targetScroll: number,
-  velocity: number
+  velocity: number,
 ) => {
   const totalDisplacement = targetScroll - initialScroll;
   const factor = 1 + (velocity * FRAME_DURATION) / totalDisplacement;
@@ -1330,14 +1328,14 @@ const getFinalScroll = (
   initialScroll: number,
   velocity: number,
   decelerationFactor: number,
-  minVelocity = 0.05
+  minVelocity = 0.05,
 ) => {
   if (decelerationFactor >= 1) {
     return { finalScroll: initialScroll, iterations: 0 };
   }
   // Number of frames until velocity drops below minVelocity
   const iterations = Math.ceil(
-    Math.log(minVelocity / Math.abs(velocity)) / Math.log(decelerationFactor)
+    Math.log(minVelocity / Math.abs(velocity)) / Math.log(decelerationFactor),
   );
 
   const finalScroll =
