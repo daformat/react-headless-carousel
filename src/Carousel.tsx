@@ -54,6 +54,8 @@ type ScrollState = {
   }>;
   mouseDirection: number;
   scrollSnapType: string;
+  cachedScrollWidth: number;
+  cachedOffsetWidth: number;
 };
 
 type ScrollIntoView = (
@@ -587,6 +589,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       initialPointerPosition: null as MaybeNull<{ x: number; y: number }>,
       mouseDirection: 0,
       scrollSnapType: scrollSnapType ?? "",
+      cachedScrollWidth: 0,
+      cachedOffsetWidth: 0,
     });
 
     // Keep the ref in sync with the prop on every render so event handlers
@@ -621,6 +625,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           (container.scrollWidth ?? 0) - (translateX > 0 ? translateX : 0);
         const containerOffsetWidth = container.offsetWidth ?? 0;
         const containerScrollLeft = container.scrollLeft ?? 0;
+        scrollStateRef.current.cachedScrollWidth = containerScrollWidth;
+        scrollStateRef.current.cachedOffsetWidth = containerOffsetWidth;
         if (!container || containerScrollWidth <= containerOffsetWidth) {
           setScrollsBackwards(false);
           setScrollsForwards(false);
@@ -759,8 +765,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         const items = container.querySelectorAll(
           ":scope [data-carousel-content] > *",
         );
-        const maxDistance = container.offsetWidth / 3;
-        const maxScrollLeft = container.scrollWidth - container.offsetWidth;
+        const maxDistance = state.cachedOffsetWidth / 3;
+        const maxScrollLeft = state.cachedScrollWidth - state.cachedOffsetWidth;
         const targetScrollLeft = state.scrollLeft + scrollDelta;
         const overscroll =
           targetScrollLeft < 0
@@ -901,9 +907,9 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         const isRubberBanding =
           container.scrollLeft <= 1 ||
           container.scrollLeft >=
-            container.scrollWidth - container.offsetWidth - 1;
+            state.cachedScrollWidth - state.cachedOffsetWidth - 1;
         const rubberBandingFactor = isRubberBanding
-          ? (state.velocityX * 25) / container.scrollWidth
+          ? (state.velocityX * 25) / state.cachedScrollWidth
           : 0;
         const friction = 0.05 + Math.abs(rubberBandingFactor);
         const decelerationFactor = 1 - friction;
@@ -917,7 +923,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
 
         if (
           !isRubberBanding &&
-          finalScroll < container.scrollWidth - container.offsetWidth &&
+          finalScroll < state.cachedScrollWidth - state.cachedOffsetWidth &&
           finalScroll > 0 &&
           Math.abs(state.velocityX) >= minVelocityForSnapping &&
           state.scrollSnapType
@@ -963,8 +969,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         state.velocityX *= decelerationFactor;
 
         const newScrollLeft = container2.scrollLeft;
-        const scrollWidth = container2.scrollWidth;
-        const offsetWidth = container2.offsetWidth;
+        const scrollWidth = state.cachedScrollWidth;
+        const offsetWidth = state.cachedOffsetWidth;
         const remainingForwards = scrollWidth - offsetWidth - newScrollLeft;
         const remainingBackwards = newScrollLeft;
 
@@ -1164,6 +1170,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
               : {}),
             position: "relative",
             overflow: "scroll",
+            contain: "layout style",
             msOverflowStyle: "none",
             overscrollBehaviorX: "contain",
             scrollbarColor: "transparent transparent",
@@ -1218,6 +1225,7 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
       <div
         ref={ref as RefObject<HTMLDivElement>}
         {...props}
+        style={{ willChange: "transform", ...props.style }}
         data-carousel-item=""
       >
         {children}
