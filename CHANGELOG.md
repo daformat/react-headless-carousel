@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.2
+
+### Patch Changes
+
+- 3ee382c: Limit re-renders
+
 ## 1.0.1
 
 ### Patch Changes
