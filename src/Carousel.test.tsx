@@ -24,7 +24,7 @@ const stubViewportLayout = (
     scrollWidth = 1000,
     offsetWidth = 300,
     scrollLeft = 0,
-  }: { scrollWidth?: number; offsetWidth?: number; scrollLeft?: number } = {}
+  }: { scrollWidth?: number; offsetWidth?: number; scrollLeft?: number } = {},
 ) => {
   let _scrollLeft = scrollLeft;
   Object.defineProperty(el, "scrollWidth", {
@@ -54,7 +54,7 @@ const getViewport = () =>
  * jsdom, where getComputedStyle does not honour SCSS-defined custom properties.
  */
 const renderCarousel = (
-  viewportProps: Partial<Parameters<typeof Carousel.Viewport>[0]> = {}
+  viewportProps: Partial<Parameters<typeof Carousel.Viewport>[0]> = {},
 ) =>
   render(
     <Carousel.Root boundaryOffset={{ x: 0, y: 0 }}>
@@ -69,7 +69,7 @@ const renderCarousel = (
       </Carousel.Viewport>
       <Carousel.PrevPage>prev</Carousel.PrevPage>
       <Carousel.NextPage>next</Carousel.NextPage>
-    </Carousel.Root>
+    </Carousel.Root>,
   );
 
 afterEach(() => {
@@ -84,7 +84,7 @@ beforeEach(() => {
     class {
       observe() {}
       disconnect() {}
-    }
+    },
   );
   // Stub MutationObserver so updateScrollState is only triggered by explicit
   // scroll events in the tests, not by incidental DOM mutations.
@@ -93,7 +93,7 @@ beforeEach(() => {
     class {
       observe() {}
       disconnect() {}
-    }
+    },
   );
   // Prevent momentum animation side effects—the component uses rAF internally
   // and we don't want frames firing between assertions.
@@ -121,7 +121,7 @@ describe("Carousel", () => {
       render(
         <Carousel.Root>
           <span>hello</span>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(document.querySelector("span")?.textContent).toBe("hello");
     });
@@ -130,7 +130,7 @@ describe("Carousel", () => {
       render(
         <Carousel.Root>
           <Carousel.Viewport>content</Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(document.querySelector("[data-carousel-viewport]")).not.toBeNull();
     });
@@ -141,7 +141,7 @@ describe("Carousel", () => {
           <Carousel.Viewport>
             <Carousel.Content>items</Carousel.Content>
           </Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(document.querySelector("[data-carousel-content]")).not.toBeNull();
     });
@@ -156,7 +156,7 @@ describe("Carousel", () => {
               </Carousel.Item>
             </Carousel.Content>
           </Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(document.querySelector("[data-carousel-item]")).not.toBeNull();
     });
@@ -171,7 +171,7 @@ describe("Carousel", () => {
               </Carousel.Item>
             </Carousel.Content>
           </Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       const link = screen.getByRole("link");
       expect(link.tagName).toBe("A");
@@ -231,11 +231,11 @@ describe("Carousel", () => {
       await waitFor(() => {
         expect(
           (screen.getByRole("button", { name: "prev" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(true);
         expect(
           (screen.getByRole("button", { name: "next" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(true);
       });
     });
@@ -248,11 +248,11 @@ describe("Carousel", () => {
       await waitFor(() => {
         expect(
           (screen.getByRole("button", { name: "prev" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(true);
         expect(
           (screen.getByRole("button", { name: "next" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(false);
       });
     });
@@ -265,11 +265,11 @@ describe("Carousel", () => {
       await waitFor(() => {
         expect(
           (screen.getByRole("button", { name: "next" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(true);
         expect(
           (screen.getByRole("button", { name: "prev" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(false);
       });
     });
@@ -284,7 +284,7 @@ describe("Carousel", () => {
       await waitFor(() => {
         expect(
           (screen.getByRole("button", { name: "next" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(false);
       });
       fireEvent.click(screen.getByRole("button", { name: "next" }));
@@ -300,7 +300,7 @@ describe("Carousel", () => {
       await waitFor(() => {
         expect(
           (screen.getByRole("button", { name: "prev" }) as HTMLButtonElement)
-            .disabled
+            .disabled,
         ).toBe(false);
       });
       fireEvent.click(screen.getByRole("button", { name: "prev" }));
@@ -313,7 +313,7 @@ describe("Carousel", () => {
       render(
         <Carousel.Root>
           <Carousel.Viewport contentFade>content</Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(getViewport().style.maskImage).toContain("linear-gradient");
     });
@@ -322,7 +322,7 @@ describe("Carousel", () => {
       render(
         <Carousel.Root>
           <Carousel.Viewport contentFade={false}>content</Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(getViewport().style.maskImage).toBe("");
     });
@@ -333,10 +333,10 @@ describe("Carousel", () => {
           <Carousel.Viewport contentFade contentFadeSize="48px">
             content
           </Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(getViewport().style.getPropertyValue("--carousel-fade-size")).toBe(
-        "48px"
+        "48px",
       );
     });
 
@@ -346,10 +346,10 @@ describe("Carousel", () => {
           <Carousel.Viewport contentFade contentFadeSize={32}>
             content
           </Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
       expect(getViewport().style.getPropertyValue("--carousel-fade-size")).toBe(
-        "32px"
+        "32px",
       );
     });
   });
@@ -365,7 +365,7 @@ describe("Carousel", () => {
               </Carousel.Item>
             </Carousel.Content>
           </Carousel.Viewport>
-        </Carousel.Root>
+        </Carousel.Root>,
       );
 
     it("suppresses clicks on children after a drag of more than 3px", () => {
@@ -440,7 +440,7 @@ describe("Carousel", () => {
         vi.fn((cb: FrameRequestCallback) => {
           callbacks.push(cb);
           return callbacks.length;
-        })
+        }),
       );
       return callbacks;
     };
@@ -557,14 +557,14 @@ describe("Carousel", () => {
       vi.useRealTimers();
 
       const items = Array.from(
-        document.querySelectorAll("[data-carousel-item]")
+        document.querySelectorAll("[data-carousel-item]"),
       ) as HTMLElement[];
       expect(items.length).toBeGreaterThan(0);
       // Every item should carry a non-trivial translate offset
       expect(
         items.every((item) =>
-          (item.getAttribute("style") ?? "").includes("translate")
-        )
+          (item.getAttribute("style") ?? "").includes("translate"),
+        ),
       ).toBe(true);
     });
 
@@ -596,12 +596,12 @@ describe("Carousel", () => {
       vi.useRealTimers();
 
       const items = Array.from(
-        document.querySelectorAll("[data-carousel-item]")
+        document.querySelectorAll("[data-carousel-item]"),
       ) as HTMLElement[];
       expect(
         items.every(
-          (item) => !(item.getAttribute("style") ?? "").includes("translate")
-        )
+          (item) => !(item.getAttribute("style") ?? "").includes("translate"),
+        ),
       ).toBe(true);
     });
   });
