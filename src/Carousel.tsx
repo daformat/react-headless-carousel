@@ -151,8 +151,12 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
     const [scrollsForwards, setScrollsForwards] = useState(false);
     const remainingForwards = useRef(0);
     const remainingBackwards = useRef(0);
-    const setRemainingForwards = useCallback((value: number) => { remainingForwards.current = value; }, []);
-    const setRemainingBackwards = useCallback((value: number) => { remainingBackwards.current = value; }, []);
+    const setRemainingForwards = useCallback((value: number) => {
+      remainingForwards.current = value;
+    }, []);
+    const setRemainingBackwards = useCallback((value: number) => {
+      remainingBackwards.current = value;
+    }, []);
     const [scrollStateRef, setScrollStateRef] =
       useState<MaybeUndefined<RefObject<ScrollState>>>(undefined);
     const rootRef = useRef<HTMLDivElement>(null);
