@@ -1,0 +1,40 @@
+{
+  "name": "react-headless-carousel",
+  "version": "1.0.0",
+  "license": "MIT",
+  "description": "A react headless carousel component, with no dependencies, supporting drag to scroll, inertia, rubber-banding, snapping and more",
+  "keywords": [
+    "carousel",
+    "react",
+    "headless",
+    "carousel-component",
+    "react-component"
+  ],
+  "homepage": "https://github.com/daformat/react-headless-carousel",
+  "bugs": {
+    "url": "https://github.com/daformat/react-headless-carousel/issues"
+  },
+  "author": "Mathieu Jouhet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daformat/react-headless-carousel.git"
+  },
+  "scripts": {
+    "build": "tsc",
+    "ci": "pnpm build",
+    "format": "prettier --write ."
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "packageManager": "pnpm@10.4.0+sha512.6b849d0787d97f8f4e1f03a9b8ff8f038e79e153d6f11ae539ae7c435ff9e796df6a862c991502695c7f9e8fac8aeafc1ac5a8dab47e36148d183832d886dd52",
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "prettier": "^3.8.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^6.0.2"
+  }
+}
