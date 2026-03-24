@@ -24,6 +24,8 @@
     "ci": "pnpm build && pnpm format:check && pnpm test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "local-release": "changeset version && changeset publish",
+    "prepublishOnly": "npm run ci",
     "test": "vitest run"
   },
   "files": [
