@@ -72,8 +72,8 @@ type CarouselContext = {
   handleScrollToNext: () => void;
   handleScrollToPrev: () => void;
   scrollIntoView: ScrollIntoView;
-  remainingForwards?: number;
-  remainingBackwards?: number;
+  remainingForwards: React.RefObject<number>;
+  remainingBackwards: React.RefObject<number>;
   setRemainingForwards: (remainingForwards: number) => void;
   setRemainingBackwards: (remainingBackwards: number) => void;
   scrollStateRef?: MaybeUndefined<RefObject<ScrollState>>;
@@ -91,6 +91,8 @@ const CarouselContext = createContext<CarouselContext>({
   setScrollsForwards: () => {},
   scrollsBackwards: false,
   scrollsForwards: false,
+  remainingForwards: { current: 0 },
+  remainingBackwards: { current: 0 },
   setRemainingForwards: () => {},
   setRemainingBackwards: () => {},
   setScrollStateRef: () => {},
@@ -147,8 +149,10 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
     });
     const [scrollsBackwards, setScrollsBackwards] = useState(false);
     const [scrollsForwards, setScrollsForwards] = useState(false);
-    const [remainingForwards, setRemainingForwards] = useState(0);
-    const [remainingBackwards, setRemainingBackwards] = useState(0);
+    const remainingForwards = useRef(0);
+    const remainingBackwards = useRef(0);
+    const setRemainingForwards = useCallback((value: number) => { remainingForwards.current = value; }, []);
+    const setRemainingBackwards = useCallback((value: number) => { remainingBackwards.current = value; }, []);
     const [scrollStateRef, setScrollStateRef] =
       useState<MaybeUndefined<RefObject<ScrollState>>>(undefined);
     const rootRef = useRef<HTMLDivElement>(null);
@@ -494,8 +498,6 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       ref,
       scrollsBackwards,
       scrollsForwards,
-      remainingForwards,
-      remainingBackwards,
       scrollStateRef,
       handleScrollToNext,
       handleScrollToPrev,
