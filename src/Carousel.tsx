@@ -1235,13 +1235,22 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
         // eslint-disable-next-line react-hooks/refs
         ref: childRef ? combineRefs(childRef, ref as RefObject<unknown>) : ref,
         "data-carousel-item": "",
+        style: {
+          willChange: "transform",
+          contentVisibility: "auto",
+          ...props.style,
+        },
       });
     }
     return (
       <div
         ref={ref as RefObject<HTMLDivElement>}
         {...props}
-        style={{ willChange: "transform", ...props.style }}
+        style={{
+          willChange: "transform",
+          contentVisibility: "auto",
+          ...props.style,
+        }}
         data-carousel-item=""
       >
         {children}
