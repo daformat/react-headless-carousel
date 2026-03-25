@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.6
+
+### Patch Changes
+
+- b86d11e: Merge style when asChild
+
 ## 1.0.5
 
 ### Patch Changes
