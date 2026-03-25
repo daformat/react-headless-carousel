@@ -678,8 +678,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     ]);
 
     /**
-     * Prevent native scroll when dragging, reset velocity when not dragging to
-     * avoid cumulating momentum.
+     * Prevent native scroll when dragging
      */
     const preventWheelScroll = useCallback((event: WheelEvent) => {
       event.preventDefault();
