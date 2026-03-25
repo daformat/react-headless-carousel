@@ -681,17 +681,12 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      * Prevent native scroll when dragging, reset velocity when not dragging to
      * avoid cumulating momentum.
      */
-    const handlePreventScroll = useCallback((event: WheelEvent) => {
-      if (scrollStateRef.current.isDragging) {
-        event.preventDefault();
-      } else {
-        scrollStateRef.current.velocityX = 0;
-      }
+    const preventWheelScroll = useCallback((event: WheelEvent) => {
+      event.preventDefault();
     }, []);
 
     /**
-     * Set up observers and scrolling event listeners to update the scroll state
-     * and prevent native scroll when dragging.
+     * Set up observers and scrolling event listeners to update the scroll state.
      */
     useLayoutEffect(() => {
       const container = containerRef.current;
@@ -705,19 +700,15 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           subtree: true,
         });
         container.addEventListener("scroll", updateScrollState);
-        container.addEventListener("wheel", handlePreventScroll, {
-          passive: false,
-        });
         updateScrollState();
         return () => {
           resizeObserver.disconnect();
           mutationObserver.disconnect();
           container.removeEventListener("scroll", updateScrollState);
-          container.removeEventListener("wheel", handlePreventScroll);
         };
       }
       return;
-    }, [handlePreventScroll, updateScrollState]);
+    }, [updateScrollState]);
 
     /**
      * Initialize dragging.
@@ -740,7 +731,9 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           return;
         }
 
-        // set to hidden to prevent momentum scrolling from the wheel when dragging
+        container.addEventListener("wheel", preventWheelScroll, {
+          passive: false,
+        });
         container.style.overflowX = "hidden";
         state.cachedScrollWidth = container.scrollWidth;
         state.cachedOffsetWidth = container.offsetWidth;
@@ -756,7 +749,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         event.stopPropagation();
         onPointerDown?.(event);
       },
-      [onPointerDown],
+      [onPointerDown, preventWheelScroll],
     );
 
     /**
@@ -1047,6 +1040,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         if (!state.isDragging || !container) {
           return;
         }
+        container.removeEventListener("wheel", preventWheelScroll);
         container.style.overflowX = "";
         // dispatch click if needed (we prevented it on pointer down)
         if (
@@ -1071,7 +1065,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }
         onPointerUp?.(event);
       },
-      [onPointerUp, startMomentumAnimation],
+      [onPointerUp, preventWheelScroll, startMomentumAnimation],
     );
 
     useEffect(() => {
@@ -1149,6 +1143,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           onClickCapture?.(event);
         }}
         onWheel={(event) => {
+          clearAnimation();
           event.currentTarget.style.scrollSnapType =
             scrollStateRef.current.scrollSnapType;
           onWheel?.(event);
