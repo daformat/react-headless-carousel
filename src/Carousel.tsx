@@ -19,8 +19,6 @@ import {
 
 import type { MaybeNull, MaybeUndefined } from "./utils/maybe.js";
 
-console.log("Carousel");
-
 /**
  * Use a fixed frame duration so that we can accurately predict snapping and
  * other momentum-based calculations. This is an acceptable tradeoff, since
@@ -236,12 +234,15 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
               nextItem.offsetWidth < container.offsetWidth - offset * 2
             ) {
               delta =
-                getOffsetLeft(nextItem, container) - container.scrollLeft - offset;
+                getOffsetLeft(nextItem, container) -
+                container.scrollLeft -
+                offset;
             }
           } else {
             const prevItem = items
               .filter(
-                (item) => getOffsetLeft(item, container) < currentScroll + offset,
+                (item) =>
+                  getOffsetLeft(item, container) < currentScroll + offset,
               )
               .reverse()[0];
             if (
@@ -335,10 +336,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           const targetLeft = getOffsetLeft(target, container);
           let scrollPosition = isBefore
             ? targetLeft - offset
-            : targetLeft -
-              container.offsetWidth +
-              target.offsetWidth +
-              offset;
+            : targetLeft - container.offsetWidth + target.offsetWidth + offset;
           let iterations = 0;
           const maxIterations = 20;
           // Adjust scroll position to account for snapping, if the target is
@@ -394,10 +392,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         let scrollPosition =
           direction === "forwards"
             ? targetLeft - offset
-            : targetLeft -
-              container.offsetWidth +
-              target.offsetWidth +
-              offset;
+            : targetLeft - container.offsetWidth + target.offsetWidth + offset;
         if (inline === "center") {
           scrollPosition =
             targetLeft - (container.offsetWidth - target.offsetWidth) / 2;
@@ -480,7 +475,9 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         const currentScroll = container.scrollLeft;
         const { x: boundaryOffsetX } = getBoundaryOffset(boundaryOffset, root);
         const isPrevItem = (item: HTMLElement) => {
-          return currentScroll > getOffsetLeft(item, container) - boundaryOffsetX;
+          return (
+            currentScroll > getOffsetLeft(item, container) - boundaryOffsetX
+          );
         };
         const prevItems = items.filter(isPrevItem);
         const prevItem = prevItems[prevItems.length - 1] ?? items[0];
