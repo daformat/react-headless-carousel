@@ -959,12 +959,12 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       const state = scrollStateRef.current;
       state.cachedScrollWidth = container.scrollWidth;
       state.cachedOffsetWidth = container.offsetWidth;
+      state.scrollLeft = container.scrollLeft;
       const minVelocity = 0.00001;
       const decelerationFactor = computeMomentumDecelerationFactor(
         container,
         minVelocity,
       );
-
       const animate = () => {
         const container2 = containerRef.current;
         if (!container2) {
@@ -972,11 +972,14 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }
 
         container2.style.scrollSnapType = "none";
-        container2.scrollLeft -= state.velocityX * FRAME_DURATION;
-        state.scrollLeft = container2.scrollLeft;
+        // this is important: since some browsers (hem, Safari, **cough cough**)
+        // round the DOM scrollLeft property, we have to keep our own state in
+        // order for the final scroll not to drift from the predicted value
+        state.scrollLeft -= state.velocityX * FRAME_DURATION;
+        container2.scrollLeft = state.scrollLeft;
         state.velocityX *= decelerationFactor;
 
-        const newScrollLeft = container2.scrollLeft;
+        const newScrollLeft = state.scrollLeft;
         const scrollWidth = state.cachedScrollWidth;
         const offsetWidth = state.cachedOffsetWidth;
         const remainingForwards = scrollWidth - offsetWidth - newScrollLeft;
