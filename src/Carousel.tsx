@@ -175,6 +175,9 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       if (animationId) {
         cancelAnimationFrame(animationId);
       }
+      // this is a ref, although it's in a state to be able to pass it around,
+      // it is safe to mutate it, using the setter would cause unwanted re-renders
+      // eslint-disable-next-line react-hooks/immutability
       state.animationId = null;
       state.velocityX = 0;
       const container = ref.current;
@@ -396,6 +399,9 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       const container = ref?.current;
       const root = rootRef?.current;
       if (root && container && container.scrollLeft < container.scrollWidth) {
+        // this is a ref, although it's in a state to be able to pass it around,
+        // it is safe to mutate it, using the setter would cause unwanted re-renders
+        // eslint-disable-next-line react-hooks/immutability
         container.style.scrollSnapType =
           scrollStateRef?.current?.scrollSnapType ?? "";
         const items = Array.from(
@@ -443,6 +449,9 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       const container = ref?.current;
       const root = rootRef?.current;
       if (root && container && container.scrollLeft > 0) {
+        // this is a ref, although it's in a state to be able to pass it around,
+        // it is safe to mutate it, using the setter would cause unwanted re-renders
+        // eslint-disable-next-line react-hooks/immutability
         container.style.scrollSnapType =
           scrollStateRef?.current?.scrollSnapType ?? "";
         const items = Array.from(
@@ -504,6 +513,8 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       ref,
       scrollsBackwards,
       scrollsForwards,
+      setRemainingForwards,
+      setRemainingBackwards,
       scrollStateRef,
       handleScrollToNext,
       handleScrollToPrev,
@@ -595,6 +606,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
 
     // Keep the ref in sync with the prop on every render so event handlers
     // always see the current value without needing a layout effect.
+    // eslint-disable-next-line react-hooks/refs
     scrollStateRef.current.scrollSnapType = scrollSnapType ?? "";
 
     /**
@@ -730,6 +742,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
 
         // set to hidden to prevent momentum scrolling from the wheel when dragging
         container.style.overflowX = "hidden";
+        state.cachedScrollWidth = container.scrollWidth;
+        state.cachedOffsetWidth = container.offsetWidth;
         state.isDragging = true;
         state.startX = event.clientX;
         state.lastX = event.clientX;
@@ -951,6 +965,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         return;
       }
       const state = scrollStateRef.current;
+      state.cachedScrollWidth = container.scrollWidth;
+      state.cachedOffsetWidth = container.offsetWidth;
       const minVelocity = 0.00001;
       const decelerationFactor = computeMomentumDecelerationFactor(
         container,
@@ -1215,8 +1231,11 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
     if (asChild && isValidElement(children)) {
       const child = children as ReactElement<Record<string, unknown>>;
       const childRef = (children as { ref?: RefObject<unknown> }).ref;
+      // we need to combine the refs here
+      // eslint-disable-next-line react-hooks/refs
       return cloneElement(child, {
         ...props,
+        // eslint-disable-next-line react-hooks/refs
         ref: childRef ? combineRefs(childRef, ref as RefObject<unknown>) : ref,
         "data-carousel-item": "",
       });
