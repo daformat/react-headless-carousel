@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.7
+
+### Patch Changes
+
+- 757b56e: Support for nested offset parents
+
 ## 1.0.6
 
 ### Patch Changes

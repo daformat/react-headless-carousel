@@ -1,6 +1,6 @@
 {
   "name": "@daformat/react-headless-carousel",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "license": "MIT",
   "description": "A react headless carousel component, with no dependencies, supporting drag to scroll, inertia, rubber-banding, snapping and more",
   "keywords": [
