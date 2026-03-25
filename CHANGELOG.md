@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.5
+
+### Patch Changes
+
+- e404f18: Fix Safari issue with non-passive events and scrollLeft precision rounding
+
 ## 1.0.4
 
 ### Patch Changes
