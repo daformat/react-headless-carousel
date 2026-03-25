@@ -19,6 +19,8 @@ import {
 
 import type { MaybeNull, MaybeUndefined } from "./utils/maybe.js";
 
+console.log("Carousel");
+
 /**
  * Use a fixed frame duration so that we can accurately predict snapping and
  * other momentum-based calculations. This is an acceptable tradeoff, since
@@ -135,6 +137,15 @@ const defaultBoundaryOffset = (container: HTMLElement) => {
   return { x: 0, y: 0 };
 };
 
+/**
+ * Returns the element's left offset relative to the scroll container's content
+ * coordinate space, regardless of intermediate offsetParent ancestors.
+ */
+const getOffsetLeft = (element: HTMLElement, container: HTMLElement): number =>
+  element.getBoundingClientRect().left -
+  container.getBoundingClientRect().left +
+  container.scrollLeft;
+
 type CarouselRootProps = {
   boundaryOffset?:
     | { x: number; y: number }
@@ -217,18 +228,21 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           if (direction === "forwards") {
             const nextItem = items.find(
               (item) =>
-                item.offsetLeft + item.offsetWidth >
+                getOffsetLeft(item, container) + item.offsetWidth >
                 currentScroll + container.offsetWidth - offset,
             );
             if (
               nextItem &&
               nextItem.offsetWidth < container.offsetWidth - offset * 2
             ) {
-              delta = nextItem.offsetLeft - container.scrollLeft - offset;
+              delta =
+                getOffsetLeft(nextItem, container) - container.scrollLeft - offset;
             }
           } else {
             const prevItem = items
-              .filter((item) => item.offsetLeft < currentScroll + offset)
+              .filter(
+                (item) => getOffsetLeft(item, container) < currentScroll + offset,
+              )
               .reverse()[0];
             if (
               prevItem &&
@@ -236,7 +250,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
             ) {
               delta =
                 container.scrollLeft -
-                prevItem.offsetLeft -
+                getOffsetLeft(prevItem, container) -
                 container.offsetWidth -
                 offset;
             }
@@ -301,25 +315,27 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           ? getBoundaryOffset(boundaryOffset, rootRef.current).x
           : 0;
         const getIsBeforeAfter = () => {
-          const isBefore = target.offsetLeft < container.scrollLeft + offset;
+          const targetLeft = getOffsetLeft(target, container);
+          const isBefore = targetLeft < container.scrollLeft + offset;
           const isAfter =
-            target.offsetLeft + target.offsetWidth >
+            targetLeft + target.offsetWidth >
             container.scrollLeft + container.offsetWidth - offset;
           return { isBefore, isAfter };
         };
         let { isBefore, isAfter } = getIsBeforeAfter();
         // Default when the target is larger than the container
         if (isBefore && isAfter) {
-          const scrollPosition = target.offsetLeft - offset;
+          const scrollPosition = getOffsetLeft(target, container) - offset;
           container.scrollTo({
             left: scrollPosition <= offset ? 0 : scrollPosition,
             behavior: "smooth",
           });
         } else if (isBefore || isAfter) {
           const currentScroll = container.scrollLeft;
+          const targetLeft = getOffsetLeft(target, container);
           let scrollPosition = isBefore
-            ? target.offsetLeft - offset
-            : target.offsetLeft -
+            ? targetLeft - offset
+            : targetLeft -
               container.offsetWidth +
               target.offsetWidth +
               offset;
@@ -374,17 +390,17 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         const offset = rootRef.current
           ? getBoundaryOffset(boundaryOffset, rootRef.current).x
           : 0;
+        const targetLeft = getOffsetLeft(target, container);
         let scrollPosition =
           direction === "forwards"
-            ? target.offsetLeft - offset
-            : target.offsetLeft -
+            ? targetLeft - offset
+            : targetLeft -
               container.offsetWidth +
               target.offsetWidth +
               offset;
         if (inline === "center") {
           scrollPosition =
-            target.offsetLeft -
-            (container.offsetWidth - target.offsetWidth) / 2;
+            targetLeft - (container.offsetWidth - target.offsetWidth) / 2;
         }
         snappedScrollTo(scrollPosition, container);
       },
@@ -416,7 +432,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         const { x: boundaryOffsetX } = getBoundaryOffset(boundaryOffset, root);
         const isNextItem = (item: HTMLElement) => {
           return (
-            item.offsetLeft + item.offsetWidth >
+            getOffsetLeft(item, container) + item.offsetWidth >
             Math.ceil(currentScroll + containerOffsetWidth - boundaryOffsetX)
           );
         };
@@ -464,7 +480,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         const currentScroll = container.scrollLeft;
         const { x: boundaryOffsetX } = getBoundaryOffset(boundaryOffset, root);
         const isPrevItem = (item: HTMLElement) => {
-          return currentScroll > item.offsetLeft - boundaryOffsetX;
+          return currentScroll > getOffsetLeft(item, container) - boundaryOffsetX;
         };
         const prevItems = items.filter(isPrevItem);
         const prevItem = prevItems[prevItems.length - 1] ?? items[0];
