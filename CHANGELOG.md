@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.8
+
+### Patch Changes
+
+- d568b5d: Tweak performance hints
+
 ## 1.0.7
 
 ### Patch Changes
