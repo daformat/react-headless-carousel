@@ -1250,7 +1250,6 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
         "data-carousel-item": "",
         style: {
           willChange: "transform",
-          contentVisibility: "auto",
           ...props.style,
         },
       });
@@ -1261,7 +1260,6 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
         {...props}
         style={{
           willChange: "transform",
-          contentVisibility: "auto",
           ...props.style,
         }}
         data-carousel-item=""
