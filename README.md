@@ -21,13 +21,13 @@ https://hello-mat.com/design-engineering/component/carousel-component
     {/* The container for the items */}
     <Carousel.Content>
       {/* A carousel item */}
-      <Carousel.Item/>
-      <Carousel.Item/>
-      <Carousel.Item/>
+      <Carousel.Item />
+      <Carousel.Item />
+      <Carousel.Item />
     </Carousel.Content>
   </Carousel.Viewport>
   {/* The pagination buttons */}
-  <Carousel.PrevPage/>
-  <Carousel.NextPage/>
+  <Carousel.PrevPage />
+  <Carousel.NextPage />
 </Carousel.Root>
 ```
