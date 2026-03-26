@@ -3,9 +3,7 @@
 A react headless carousel component: scrollable, and swipeable carousel, even on desktop, complete with snapping,
 friction, rubber-banding and overscroll.
 
-<video width="320" height="240" controls autoplay loop muted>
-  <source src="https://github.com/daformat/react-headless-carousel/raw/refs/heads/main/public/carousel-overview-dark.mp4" type="video/mp4" >
-</video>
+
 
 ## Demo
 
