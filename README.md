@@ -3,6 +3,18 @@
 A react headless carousel component: scrollable, and swipeable carousel, even on desktop, complete with snapping,
 friction, rubber-banding and overscroll.
 
+## Installation
+
+```bash
+npm install @daformat/react-headless-carousel
+```
+```bash
+yarn add @daformat/react-headless-carousel
+```
+```bash
+pnpm add @daformat/react-headless-carousel
+```
+
 ## Demo
 
 https://hello-mat.com/design-engineering/component/carousel-component
