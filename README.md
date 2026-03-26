@@ -8,9 +8,11 @@ friction, rubber-banding and overscroll.
 ```bash
 npm install @daformat/react-headless-carousel
 ```
+
 ```bash
 yarn add @daformat/react-headless-carousel
 ```
+
 ```bash
 pnpm add @daformat/react-headless-carousel
 ```
