@@ -1238,30 +1238,30 @@ type CarouselItemProps = ComponentPropsWithoutRef<"div"> & {
 
 const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
   ({ children, asChild, ...props }, ref) => {
+    const baseStyle: CSSProperties = {
+      willChange: "transform",
+      scrollMarginInline: `var(${CSS_VARS.fadeSize})`,
+      ...props.style,
+    };
     if (asChild && isValidElement(children)) {
       const child = children as ReactElement<Record<string, unknown>>;
       const childRef = (children as { ref?: RefObject<unknown> }).ref;
+      const { style } = child.props as { style?: CSSProperties };
       // we need to combine the refs here
       // eslint-disable-next-line react-hooks/refs
       return cloneElement(child, {
         ...props,
         // eslint-disable-next-line react-hooks/refs
         ref: childRef ? combineRefs(childRef, ref as RefObject<unknown>) : ref,
+        style: { ...baseStyle, ...style },
         "data-carousel-item": "",
-        style: {
-          willChange: "transform",
-          ...props.style,
-        },
       });
     }
     return (
       <div
         ref={ref as RefObject<HTMLDivElement>}
         {...props}
-        style={{
-          willChange: "transform",
-          ...props.style,
-        }}
+        style={baseStyle}
         data-carousel-item=""
       >
         {children}
