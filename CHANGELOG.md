@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.10
+
+### Patch Changes
+
+- f9952b2: Do not prevent touch based click
+
 ## 1.0.9
 
 ### Patch Changes
