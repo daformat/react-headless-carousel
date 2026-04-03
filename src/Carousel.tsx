@@ -53,6 +53,7 @@ type ScrollState = {
     y: number;
   }>;
   mouseDirection: number;
+  lastPointerType: PointerEvent["pointerType"] | "";
   scrollSnapType: string;
   cachedScrollWidth: number;
   cachedOffsetWidth: number;
@@ -612,6 +613,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       initialTarget: null as MaybeNull<EventTarget>,
       initialPointerPosition: null as MaybeNull<{ x: number; y: number }>,
       mouseDirection: 0,
+      lastPointerType: "",
       scrollSnapType: scrollSnapType ?? "",
       cachedScrollWidth: 0,
       cachedOffsetWidth: 0,
@@ -727,6 +729,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      */
     const handlePointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
+        scrollStateRef.current.lastPointerType = event.pointerType;
         if (event.pointerType !== "mouse" || event.button !== 0) {
           return;
         }
@@ -1149,6 +1152,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           // detail === 0 means the click was synthesized by the keyboard (Enter/Space),
           // not by a pointer device — let it through unconditionally
           if (
+            scrollStateRef.current.lastPointerType === "mouse" &&
             !scrollStateRef.current.isDispatchingClick &&
             event.detail !== 0
           ) {
