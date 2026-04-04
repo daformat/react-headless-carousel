@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.11
+
+### Patch Changes
+
+- e71bb5d: Improve scroll-margin-inline handling and max click distance
+
 ## 1.0.10
 
 ### Patch Changes
