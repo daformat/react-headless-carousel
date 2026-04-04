@@ -15,6 +15,14 @@ yarn add @daformat/react-headless-carousel
 
 ```bash
 pnpm add @daformat/react-headless-carousel
+
+```
+```bash
+bun add @daformat/react-headless-carousel
+```
+
+```bash
+deno add npm:@daformat/react-headless-carousel
 ```
 
 ## Demo
@@ -160,13 +168,14 @@ const {
 
 The following CSS custom properties are set on the root element and can be used for custom styling.
 
-| Property                           | Description                                                                        |
-| ---------------------------------- | ---------------------------------------------------------------------------------- |
-| `--carousel-fade-size`             | Current fade size as resolved from `contentFadeSize`.                              |
-| `--carousel-remaining-forwards`    | Pixels remaining to scroll forwards (e.g. `312px`). Updated on every scroll event. |
-| `--carousel-remaining-backwards`   | Pixels remaining to scroll backwards.                                              |
-| `--carousel-fade-offset-forwards`  | Fade offset at the forwards edge (used internally by the mask gradient).           |
+| Property                          | Description                                                                        |
+| --------------------------------- |------------------------------------------------------------------------------------|
+| `--carousel-fade-size`            | Current fade size as resolved from `contentFadeSize`.                              |
+| `--carousel-remaining-forwards`   | Pixels remaining to scroll forwards (e.g. `312px`). Updated on every scroll event. |
+| `--carousel-remaining-backwards`  | Pixels remaining to scroll backwards.                                              |
+| `--carousel-fade-offset-forwards` | Fade offset at the forwards edge (used internally by the mask gradient).           |
 | `--carousel-fade-offset-backwards` | Fade offset at the backwards edge.                                                 |
+| `--carousel-scroll-margin-inline` | The inline scroll margin for the carousel items                                    |
 
 ---
 
@@ -191,4 +200,5 @@ Carousel.CSS_VARS.remainingBackwards; // "--carousel-remaining-backwards"
 Carousel.CSS_VARS.fadeOffsetForwards; // "--carousel-fade-offset-forwards"
 Carousel.CSS_VARS.fadeOffsetBackwards; // "--carousel-fade-offset-backwards"
 Carousel.CSS_VARS.overscrollTranslateX; // "--carousel-overscroll-translate-x"
+Carousel.CSS_VARS.scrollMarginInline; // "--carousel-scroll-margin-inline"
 ```
