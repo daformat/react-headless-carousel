@@ -29,6 +29,7 @@ import type { MaybeNull, MaybeUndefined } from "./utils/maybe.js";
  */
 const FRAME_DURATION = 16;
 const RUBBER_BAND_BOUNCE_COEFFICIENT = 40;
+const MAX_DISTANCE_FOR_CLICK = 3;
 const CSS_VARS = Object.freeze({
   fadeSize: "--carousel-fade-size",
   fadeOffsetBackwards: "--carousel-fade-offset-backwards",
@@ -36,6 +37,7 @@ const CSS_VARS = Object.freeze({
   overscrollTranslateX: "--carousel-overscroll-translate-x",
   remainingBackwards: "--carousel-remaining-backwards",
   remainingForwards: "--carousel-remaining-forwards",
+  scrollMarginInline: "--carousel-scroll-margin-inline",
 });
 
 type ScrollState = {
@@ -46,6 +48,7 @@ type ScrollState = {
   lastX: number;
   lastTime: number;
   velocityX: number;
+  totalTraveledX: number;
   animationId: number | null;
   initialTarget: MaybeNull<EventTarget>;
   initialPointerPosition: MaybeNull<{
@@ -598,6 +601,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       setRemainingBackwards,
       setScrollStateRef,
       clearAnimation,
+      boundaryOffset,
       rootRef,
     } = useContext(CarouselContext);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -609,6 +613,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       lastX: 0,
       lastTime: 0,
       velocityX: 0,
+      totalTraveledX: 0,
       animationId: null as number | null,
       initialTarget: null as MaybeNull<EventTarget>,
       initialPointerPosition: null as MaybeNull<{ x: number; y: number }>,
@@ -675,6 +680,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           containerScrollWidth - containerScrollLeft - containerOffsetWidth;
         setRemainingForwards(remainingForwards);
         setRemainingBackwards(remainingBackwards);
+        const { x: offsetX } = getBoundaryOffset(boundaryOffset, root);
+        root.style.setProperty(CSS_VARS.scrollMarginInline, `${offsetX}px`);
         root.style.setProperty(
           CSS_VARS.remainingForwards,
           `${remainingForwards}px`,
@@ -686,6 +693,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       }
     }, [
       rootRef,
+      boundaryOffset,
       setRemainingBackwards,
       setRemainingForwards,
       setScrollsBackwards,
@@ -758,6 +766,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         state.scrollLeft = container.scrollLeft ?? 0;
         state.lastTime = Date.now();
         state.velocityX = 0;
+        state.totalTraveledX = 0;
         state.initialTarget = event.target;
         state.initialPointerPosition = { x: event.clientX, y: event.clientY };
         event.preventDefault();
@@ -837,6 +846,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         const currentTime = Date.now();
         const deltaTime = currentTime - state.lastTime;
         const deltaX = event.clientX - state.lastX;
+        state.totalTraveledX += Math.abs(deltaX);
         if (deltaTime > 0) {
           state.velocityX = deltaX / deltaTime; // (pixels per millisecond)
           clampVelocity(maxAbsoluteVelocity);
@@ -1060,13 +1070,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }
         container.removeEventListener("wheel", preventWheelScroll);
         container.style.overflowX = "";
-        // dispatch click if needed (we prevented it on pointer down)
+        // dispatch click if needed (we prevent it on pointer down and on click)
         if (
-          state.initialPointerPosition &&
-          Math.hypot(
-            state.initialPointerPosition.x - event.clientX,
-            state.initialPointerPosition.y - event.clientY,
-          ) < 3
+          state.totalTraveledX <= MAX_DISTANCE_FOR_CLICK &&
+          event.button === 0
         ) {
           state.isDispatchingClick = true;
           state.initialTarget?.dispatchEvent(
@@ -1244,7 +1251,7 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
   ({ children, asChild, ...props }, ref) => {
     const baseStyle: CSSProperties = {
       willChange: "transform",
-      scrollMarginInline: `var(${CSS_VARS.fadeSize})`,
+      scrollMarginInline: `var(${CSS_VARS.scrollMarginInline}, var(${CSS_VARS.fadeSize}, 0))`,
       ...props.style,
     };
     if (asChild && isValidElement(children)) {
