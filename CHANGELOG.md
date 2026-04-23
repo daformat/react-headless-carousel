@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.13
+
+### Patch Changes
+
+- d538003: (chore): Update license to Zero-Clause BSD
+
 ## 1.0.12
 
 ### Patch Changes
