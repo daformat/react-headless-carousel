@@ -1,6 +1,6 @@
 # React headless carousel
 
-A react headless carousel component: scrollable, and swipeable carousel, even on desktop, complete with snapping,
+A react headless carousel component with zero-dependency: scrollable, and swipeable carousel, even on desktop, complete with snapping,
 friction, rubber-banding and overscroll.
 
 ## Installation
