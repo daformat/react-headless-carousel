@@ -1,5 +1,12 @@
 # react-headless-carousel
 
+## 1.0.12
+
+### Patch Changes
+
+- 0ba1b9a: (fix): Improve support for mock environments (no pointer capture)
+- 4403421: (fix): Improve support for mock environments (no pointer capture)
+
 ## 1.0.11
 
 ### Patch Changes
