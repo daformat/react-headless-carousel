@@ -741,7 +741,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         if (event.pointerType !== "mouse" || event.button !== 0) {
           return;
         }
-        event.currentTarget.setPointerCapture(event.pointerId);
+        event.currentTarget.setPointerCapture?.(event.pointerId);
 
         const state = scrollStateRef.current;
         if (state.animationId !== null) {
@@ -1062,7 +1062,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }
         const container = containerRef.current;
         if ("pointerId" in event) {
-          container?.releasePointerCapture(event.pointerId);
+          container?.releasePointerCapture?.(event.pointerId);
         }
         const state = scrollStateRef.current;
         if (!state.isDragging || !container) {
