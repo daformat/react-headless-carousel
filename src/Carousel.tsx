@@ -38,6 +38,14 @@ const CSS_VARS = Object.freeze({
   remainingBackwards: "--carousel-remaining-backwards",
   remainingForwards: "--carousel-remaining-forwards",
   scrollMarginInline: "--carousel-scroll-margin-inline",
+  viewportPaddingInlineStart: "--carousel-viewport-padding-inline-start",
+  viewportPaddingInlineEnd: "--carousel-viewport-padding-inline-end",
+  viewportPaddingBlockStart: "--carousel-viewport-padding-block-start",
+  viewportPaddingBlockEnd: "--carousel-viewport-padding-block-end",
+  contentPaddingInlineStart: "--carousel-content-padding-inline-start",
+  contentPaddingInlineEnd: "--carousel-content-padding-inline-end",
+  contentPaddingBlockStart: "--carousel-content-padding-block-start",
+  contentPaddingBlockEnd: "--carousel-content-padding-block-end",
 });
 
 type ScrollState = {
@@ -1069,7 +1077,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           return;
         }
         container.removeEventListener("wheel", preventWheelScroll);
-        container.style.overflowX = "";
+        container.style.overflowX = "scroll";
         // dispatch click if needed (we prevent it on pointer down and on click)
         if (
           state.totalTraveledX <= MAX_DISTANCE_FOR_CLICK &&
@@ -1100,6 +1108,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       };
     }, [handlePointerUp]);
 
+    // we need to keep the pre-tabbing scrollLeft, so we can restore it,
+    // some browsers (safari) modify it no matter what we do to prevent it
     const lastTabScrollLeft = useRef<MaybeNull<number>>(null);
 
     /**
@@ -1124,6 +1134,9 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       [scrollIntoView],
     );
 
+    /**
+     * Handle tabbing
+     */
     useEffect(() => {
       const container = containerRef.current;
       if (!container) {
@@ -1148,10 +1161,36 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       };
     }, [handleFocus]);
 
+    /**
+     * Measure element padding, used for scrollMargin
+     */
+    useEffect(() => {
+      const handleSetPaddingVariables = () => {
+        const container = containerRef.current;
+        if (container) {
+          measurePadding(container, [
+            "viewportPaddingInlineStart",
+            "viewportPaddingInlineEnd",
+            "viewportPaddingBlockStart",
+            "viewportPaddingBlockEnd",
+          ]);
+        }
+      };
+
+      const container = containerRef.current;
+      if (container) {
+        const observer = new ResizeObserver(handleSetPaddingVariables);
+        observer.observe(container);
+        return () => {
+          observer.disconnect();
+        };
+      }
+    }, []);
+
     return (
       <div
-        ref={combineRefs(containerRef, forwardedRef)}
         {...props}
+        ref={combineRefs(containerRef, forwardedRef)}
         onPointerDownCapture={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -1206,7 +1245,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
                 }
               : {}),
             position: "relative",
-            overflow: "scroll",
+            overflowX: "scroll",
             contain: "layout style",
             msOverflowStyle: "none",
             overscrollBehaviorX: "contain",
@@ -1229,10 +1268,38 @@ type CarouselContentProps = ComponentPropsWithoutRef<"div">;
 
 const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
   ({ children, ...props }, ref) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    /**
+     * Measure element padding, used for scrollMargin
+     */
+    useEffect(() => {
+      const handleSetPaddingVariables = () => {
+        const container = containerRef.current;
+        if (container) {
+          measurePadding(container, [
+            "contentPaddingInlineStart",
+            "contentPaddingInlineEnd",
+            "contentPaddingBlockStart",
+            "contentPaddingBlockEnd",
+          ]);
+        }
+      };
+
+      const container = containerRef.current;
+      if (container) {
+        const observer = new ResizeObserver(handleSetPaddingVariables);
+        observer.observe(container);
+        return () => {
+          observer.disconnect();
+        };
+      }
+    }, []);
+
     return (
       <div
-        ref={ref}
         {...props}
+        ref={combineRefs(containerRef, ref)}
         style={{ width: "fit-content", ...props.style }}
         data-carousel-content=""
       >
@@ -1241,6 +1308,7 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
     );
   },
 );
+
 CarouselContent.displayName = "Carousel.Content";
 
 type CarouselItemProps = ComponentPropsWithoutRef<"div"> & {
@@ -1249,9 +1317,24 @@ type CarouselItemProps = ComponentPropsWithoutRef<"div"> & {
 
 const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
   ({ children, asChild, ...props }, ref) => {
+    const elementRef = useRef<HTMLElement>(null);
+    const baseMarginInline = `var(${CSS_VARS.scrollMarginInline}, var(${CSS_VARS.fadeSize}, 0))`;
+
+    useLayoutEffect(() => {
+      const element = elementRef.current;
+      if (element) {
+        const paddingMargin = `calc(var(${CSS_VARS.viewportPaddingInlineStart}, 0px) + var(${CSS_VARS.contentPaddingInlineStart}, 0px))`;
+        if (element === element.parentElement?.firstElementChild) {
+          element.style.scrollMarginInline = `max(${baseMarginInline}, ${paddingMargin})`;
+        } else if (element === element.parentElement?.lastElementChild) {
+          element.style.scrollMarginInline = `max(${baseMarginInline}, ${paddingMargin})`;
+        }
+      }
+    }, [baseMarginInline]);
+
     const baseStyle: CSSProperties = {
       willChange: "transform",
-      scrollMarginInline: `var(${CSS_VARS.scrollMarginInline}, var(${CSS_VARS.fadeSize}, 0))`,
+      scrollMarginInline: baseMarginInline,
       ...props.style,
     };
     if (asChild && isValidElement(children)) {
@@ -1262,15 +1345,17 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
       // eslint-disable-next-line react-hooks/refs
       return cloneElement(child, {
         ...props,
-        // eslint-disable-next-line react-hooks/refs
-        ref: childRef ? combineRefs(childRef, ref as RefObject<unknown>) : ref,
+        ref: childRef
+          ? // eslint-disable-next-line react-hooks/refs
+            combineRefs(childRef, ref as RefObject<HTMLElement>, elementRef)
+          : ref,
         style: { ...baseStyle, ...style },
         "data-carousel-item": "",
       });
     }
     return (
       <div
-        ref={ref as RefObject<HTMLDivElement>}
+        ref={combineRefs(ref, elementRef)}
         {...props}
         style={baseStyle}
         data-carousel-item=""
@@ -1431,6 +1516,33 @@ const iOSRubberBand = (translation: number, ratio: number, dimension = 1) => {
   const easedValue =
     (1 - 1 / ((translation * constant) / dimension + 1)) * dimension;
   return easedValue * (1 - ratio);
+};
+
+const measurePadding = (
+  element: HTMLElement,
+  cssVars: [
+    // inline start
+    keyof typeof CSS_VARS,
+    // inline end
+    keyof typeof CSS_VARS,
+    // block start
+    keyof typeof CSS_VARS,
+    // block end
+    keyof typeof CSS_VARS,
+  ],
+) => {
+  const [inlineStart, inlineEnd, blockStart, blockEnd] = cssVars;
+  const styles = getComputedStyle(element);
+  const {
+    paddingInlineStart,
+    paddingInlineEnd,
+    paddingBlockStart,
+    paddingBlockEnd,
+  } = styles;
+  element.style.setProperty(CSS_VARS[inlineStart], paddingInlineStart);
+  element.style.setProperty(CSS_VARS[inlineEnd], paddingInlineEnd);
+  element.style.setProperty(CSS_VARS[blockStart], paddingBlockStart);
+  element.style.setProperty(CSS_VARS[blockEnd], paddingBlockEnd);
 };
 
 export const Carousel = {
