@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.14
+
+### Patch Changes
+
+- ff5273a: (fix): Account for viewport and content padding for first and last items scroll margin
+
 ## 1.0.13
 
 ### Patch Changes
