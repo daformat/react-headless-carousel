@@ -1,5 +1,8 @@
 # React headless carousel
 
+![NPM Version](https://img.shields.io/npm/v/%40daformat%2Freact-headless-carousel)
+ ![NPM Downloads](https://img.shields.io/npm/dm/%40daformat%2Freact-headless-carousel)
+
 A react headless carousel component with zero-dependency: scrollable, and swipeable carousel, even on desktop, complete with snapping,
 friction, rubber-banding and overscroll.
 
