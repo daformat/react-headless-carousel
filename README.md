@@ -1,7 +1,9 @@
 # React headless carousel
 
 ![NPM Version](https://img.shields.io/npm/v/%40daformat%2Freact-headless-carousel)
-![NPM Downloads](https://img.shields.io/npm/dm/%40daformat%2Freact-headless-carousel)
+![NPM Downloads](https://img.shields.io/npm/dm/%40daformat%2Freact-headless-carousel)  
+[![Follow daformat on GitHub](https://img.shields.io/github/followers/daformat?label=Follow%20%40daformat&style=social)](https://github.com/daformat)
+[![Follow daformat on X](https://img.shields.io/twitter/follow/daformat?label=Follow%20%40daformat&style=social)](https://twitter.com/daformat)
 
 A react headless carousel component with zero-dependency: scrollable, and swipeable carousel, even on desktop, complete
 with snapping,
