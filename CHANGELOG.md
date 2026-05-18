@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.15
+
+### Patch Changes
+
+- 51fdf7f: docs: update docs
+
 ## 1.0.14
 
 ### Patch Changes
