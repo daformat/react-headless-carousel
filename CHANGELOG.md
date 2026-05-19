@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.16
+
+### Patch Changes
+
+- b0e2712: chore: add exports field for better rspack support
+
 ## 1.0.15
 
 ### Patch Changes
