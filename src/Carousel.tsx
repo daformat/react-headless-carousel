@@ -343,6 +343,15 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
             left: scrollPosition <= offset ? 0 : scrollPosition,
             behavior: "smooth",
           });
+        } else if (
+          target.getBoundingClientRect().width ===
+          container.getBoundingClientRect().width
+        ) {
+          const scrollPosition = getOffsetLeft(target, container);
+          container.scrollTo({
+            left: scrollPosition <= offset ? 0 : scrollPosition,
+            behavior: "smooth",
+          });
         } else if (isBefore || isAfter) {
           const currentScroll = container.scrollLeft;
           const targetLeft = getOffsetLeft(target, container);
