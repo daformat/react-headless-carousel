@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.0.21
+
+### Patch Changes
+
+- 1efe5f3: (feat): Scroll to next target if target size is matching container
+
 ## 1.0.20
 
 ### Patch Changes
