@@ -406,9 +406,12 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           scrollIntoViewNearest(target, container);
           return;
         }
-        const offset = rootRef.current
-          ? getBoundaryOffset(boundaryOffset, rootRef.current).x
-          : 0;
+        const offset =
+          rootRef.current &&
+          target.getBoundingClientRect().width !==
+            container.getBoundingClientRect().width
+            ? getBoundaryOffset(boundaryOffset, rootRef.current).x
+            : 0;
         const targetLeft = getOffsetLeft(target, container);
         let scrollPosition =
           direction === "forwards"
@@ -454,9 +457,11 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         };
         const nextItem = items.find(isNextItem) ?? items[items.length - 1];
         if (nextItem) {
+          const nextItemOffsetWidth = nextItem.offsetWidth;
+          const containerOffsetWidth = container.offsetWidth;
           if (
-            nextItem.offsetWidth >=
-            container.offsetWidth - boundaryOffsetX * 2
+            nextItemOffsetWidth >= containerOffsetWidth - boundaryOffsetX * 2 &&
+            nextItemOffsetWidth !== containerOffsetWidth
           ) {
             handleScrollPage("forwards", container, items);
           } else {
@@ -503,9 +508,11 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         const prevItems = items.filter(isPrevItem);
         const prevItem = prevItems[prevItems.length - 1] ?? items[0];
         if (prevItem) {
+          const prevItemOffsetWidth = prevItem.offsetWidth;
+          const containerOffsetWidth = container.offsetWidth;
           if (
-            prevItem.offsetWidth >=
-            container.offsetWidth - boundaryOffsetX * 2
+            prevItemOffsetWidth >= containerOffsetWidth - boundaryOffsetX * 2 &&
+            prevItemOffsetWidth !== containerOffsetWidth
           ) {
             handleScrollPage("backwards", container, items);
           } else {
