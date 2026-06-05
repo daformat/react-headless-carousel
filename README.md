@@ -1,6 +1,7 @@
 # React headless carousel
 
 ![NPM Version](https://img.shields.io/npm/v/%40daformat%2Freact-headless-carousel)
+![gzipped](https://img.shields.io/bundlephobia/minzip/@daformat/react-headless-carousel?color=%238ab4f8&label=gzip)
 ![NPM Downloads](https://img.shields.io/npm/dm/%40daformat%2Freact-headless-carousel)  
 [![Follow daformat on GitHub](https://img.shields.io/github/followers/daformat?label=Follow%20%40daformat&style=social)](https://github.com/daformat)
 [![Follow daformat on X](https://img.shields.io/twitter/follow/daformat?label=Follow%20%40daformat&style=social)](https://twitter.com/daformat)
