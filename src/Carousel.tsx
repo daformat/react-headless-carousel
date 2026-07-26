@@ -5,6 +5,7 @@ import {
   type CSSProperties,
   type ForwardedRef,
   forwardRef,
+  Fragment,
   isValidElement,
   type ReactElement,
   type RefObject,
@@ -77,8 +78,9 @@ type ScrollIntoView = (
 ) => void;
 
 type CarouselContext = {
-  ref?: RefObject<MaybeNull<HTMLElement>>;
-  setRef: (ref: RefObject<MaybeNull<HTMLElement>>) => void;
+  loop?: boolean;
+  viewportRef?: RefObject<MaybeNull<HTMLElement>>;
+  setViewportRef: (ref: RefObject<MaybeNull<HTMLElement>>) => void;
   scrollsBackwards: boolean;
   scrollsForwards: boolean;
   setScrollsBackwards: (scrollsBackwards: boolean) => void;
@@ -100,7 +102,7 @@ type CarouselContext = {
 };
 
 const CarouselContext = createContext<CarouselContext>({
-  setRef: () => {},
+  setViewportRef: () => {},
   setScrollsBackwards: () => {},
   setScrollsForwards: () => {},
   scrollsBackwards: false,
@@ -157,6 +159,7 @@ const getOffsetLeft = (element: HTMLElement, container: HTMLElement): number =>
   container.scrollLeft;
 
 type CarouselRootProps = {
+  loop?: boolean;
   boundaryOffset?:
     | { x: number; y: number }
     | ((root: HTMLElement) => { x: number; y: number });
@@ -164,10 +167,12 @@ type CarouselRootProps = {
 
 const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
   (
-    { boundaryOffset = defaultBoundaryOffset, children, ...props },
+    { boundaryOffset = defaultBoundaryOffset, loop = true, children, ...props },
     forwardedRef,
   ) => {
-    const [ref, setRef] = useState<RefObject<MaybeNull<HTMLElement>>>({
+    const [viewportRef, setViewportRef] = useState<
+      RefObject<MaybeNull<HTMLElement>>
+    >({
       current: null,
     });
     const [scrollsBackwards, setScrollsBackwards] = useState(false);
@@ -201,7 +206,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       // eslint-disable-next-line react-hooks/immutability
       state.animationId = null;
       state.velocityX = 0;
-      const container = ref.current;
+      const container = viewportRef.current;
       if (!container) {
         return;
       }
@@ -214,7 +219,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           item.style.translate = "";
         }
       });
-    }, [ref, scrollStateRef]);
+    }, [viewportRef, scrollStateRef]);
 
     /**
      * Scroll the whole page (the container client width)
@@ -419,7 +424,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
      */
     const handleScrollToNext = useCallback(() => {
       clearAnimation();
-      const container = ref?.current;
+      const container = viewportRef?.current;
       const root = rootRef?.current;
       if (root && container && container.scrollLeft < container.scrollWidth) {
         // this is a ref, although it's in a state to be able to pass it around,
@@ -459,7 +464,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       boundaryOffset,
       clearAnimation,
       handleScrollPage,
-      ref,
+      viewportRef,
       scrollIntoView,
       scrollStateRef,
     ]);
@@ -469,7 +474,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
      */
     const handleScrollToPrev = useCallback(() => {
       clearAnimation();
-      const container = ref?.current;
+      const container = viewportRef?.current;
       const root = rootRef?.current;
       if (root && container && container.scrollLeft > 0) {
         // this is a ref, although it's in a state to be able to pass it around,
@@ -508,15 +513,16 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       boundaryOffset,
       clearAnimation,
       handleScrollPage,
-      ref,
+      viewportRef,
       scrollIntoView,
       scrollStateRef,
     ]);
 
     const carouselContext = useMemo<CarouselContext>(() => {
       return {
-        ref,
-        setRef,
+        loop,
+        viewportRef,
+        setViewportRef,
         scrollsBackwards,
         scrollsForwards,
         setScrollsBackwards,
@@ -535,7 +541,8 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         rootRef,
       };
     }, [
-      ref,
+      viewportRef,
+      loop,
       scrollsBackwards,
       scrollsForwards,
       setRemainingForwards,
@@ -599,7 +606,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     forwardedRef,
   ) => {
     const {
-      setRef,
+      loop,
+      setViewportRef,
       setScrollsBackwards,
       setScrollsForwards,
       scrollsForwards,
@@ -612,7 +620,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       boundaryOffset,
       rootRef,
     } = useContext(CarouselContext);
-    const containerRef = useRef<HTMLDivElement>(null);
+    const viewportRef = useRef<HTMLDivElement>(null);
     const scrollStateRef = useRef<ScrollState>({
       isDragging: false,
       isDispatchingClick: false,
@@ -642,9 +650,9 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      * or the content-fade in the initial frame
      */
     useLayoutEffect(() => {
-      setRef(containerRef);
+      setViewportRef(viewportRef);
       setScrollStateRef(scrollStateRef);
-    }, [setRef, setScrollStateRef]);
+    }, [setViewportRef, setScrollStateRef]);
 
     /**
      * Determine whether the container can scroll forwards or backwards based on
@@ -652,7 +660,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      * relevant state and CSS variables.
      */
     const updateScrollState = useCallback(() => {
-      const container = containerRef.current;
+      const container = viewportRef.current;
       const root = rootRef.current;
       if (container && root) {
         const translateX = Math.ceil(
@@ -719,7 +727,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      * Set up observers and scrolling event listeners to update the scroll state.
      */
     useLayoutEffect(() => {
-      const container = containerRef.current;
+      const container = viewportRef.current;
       if (container) {
         const resizeObserver = new ResizeObserver(updateScrollState);
         const mutationObserver = new MutationObserver(updateScrollState);
@@ -757,7 +765,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           state.animationId = null;
         }
 
-        const container = containerRef.current;
+        const container = viewportRef.current;
         if (!container) {
           return;
         }
@@ -842,7 +850,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      */
     const handlePointerMove = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
-        const container = containerRef.current;
+        const container = viewportRef.current;
         const state = scrollStateRef.current;
         const maxAbsoluteVelocity = 15;
         if (!state.isDragging || !container || event.pointerType !== "mouse") {
@@ -986,7 +994,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      * Start the momentum animation if needed.
      */
     const startMomentumAnimation = useCallback(() => {
-      const container = containerRef.current;
+      const container = viewportRef.current;
       if (!container) {
         return;
       }
@@ -1000,7 +1008,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         minVelocity,
       );
       const animate = () => {
-        const container2 = containerRef.current;
+        const container2 = viewportRef.current;
         if (!container2) {
           return;
         }
@@ -1068,7 +1076,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         if (event.pointerType !== "mouse") {
           return;
         }
-        const container = containerRef.current;
+        const container = viewportRef.current;
         if ("pointerId" in event) {
           container?.releasePointerCapture?.(event.pointerId);
         }
@@ -1117,7 +1125,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      */
     const handleFocus = useCallback(
       (event: FocusEvent) => {
-        const container = containerRef.current;
+        const container = viewportRef.current;
         const { target } = event;
         if (
           container &&
@@ -1138,7 +1146,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      * Handle tabbing
      */
     useEffect(() => {
-      const container = containerRef.current;
+      const container = viewportRef.current;
       if (!container) {
         return;
       }
@@ -1166,7 +1174,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      */
     useEffect(() => {
       const handleSetPaddingVariables = () => {
-        const container = containerRef.current;
+        const container = viewportRef.current;
         if (container) {
           measurePadding(container, [
             "viewportPaddingInlineStart",
@@ -1177,7 +1185,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }
       };
 
-      const container = containerRef.current;
+      const container = viewportRef.current;
       if (container) {
         const observer = new ResizeObserver(handleSetPaddingVariables);
         observer.observe(container);
@@ -1190,7 +1198,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     return (
       <div
         {...props}
-        ref={combineRefs(containerRef, forwardedRef)}
+        ref={combineRefs(viewportRef, forwardedRef)}
         onPointerDownCapture={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
