@@ -452,18 +452,13 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         const isNextItem = (item: HTMLElement) => {
           return (
             getOffsetLeft(item, container) + item.offsetWidth >
-            Math.ceil(
-              currentScroll +
-                containerOffsetWidth -
-                (item.offsetWidth !== containerOffsetWidth
-                  ? boundaryOffsetX
-                  : 0),
-            )
+            Math.ceil(currentScroll + containerOffsetWidth - boundaryOffsetX)
           );
         };
         const nextItem = items.find(isNextItem) ?? items[items.length - 1];
         if (nextItem) {
           const nextItemOffsetWidth = nextItem.offsetWidth;
+          const containerOffsetWidth = container.offsetWidth;
           if (
             nextItemOffsetWidth >= containerOffsetWidth - boundaryOffsetX * 2 &&
             nextItemOffsetWidth !== containerOffsetWidth
@@ -505,18 +500,16 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         }
         const currentScroll = container.scrollLeft;
         const { x: boundaryOffsetX } = getBoundaryOffset(boundaryOffset, root);
-        const containerOffsetWidth = container.offsetWidth;
         const isPrevItem = (item: HTMLElement) => {
           return (
-            currentScroll >
-            getOffsetLeft(item, container) -
-              (item.offsetWidth !== containerOffsetWidth ? boundaryOffsetX : 0)
+            currentScroll > getOffsetLeft(item, container) - boundaryOffsetX
           );
         };
         const prevItems = items.filter(isPrevItem);
         const prevItem = prevItems[prevItems.length - 1] ?? items[0];
         if (prevItem) {
           const prevItemOffsetWidth = prevItem.offsetWidth;
+          const containerOffsetWidth = container.offsetWidth;
           if (
             prevItemOffsetWidth >= containerOffsetWidth - boundaryOffsetX * 2 &&
             prevItemOffsetWidth !== containerOffsetWidth
