@@ -1,4 +1,5 @@
 import {
+  Children,
   cloneElement,
   type ComponentPropsWithoutRef,
   createContext,
@@ -1277,6 +1278,8 @@ type CarouselContentProps = ComponentPropsWithoutRef<"div">;
 const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
   ({ children, ...props }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const { loop } = useCarouselContext();
+    const [duplicates, setDuplicates] = useState(0);
 
     /**
      * Measure element padding, used for scrollMargin
@@ -1304,6 +1307,103 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
       }
     }, []);
 
+    /**
+     * Figure out how many times children have to be duplicated to fill the viewport
+     */
+    useLayoutEffect(() => {
+      if (!loop) {
+        // cleanup previous duplicates if needed
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setDuplicates(0);
+        return;
+      }
+
+      const computeRequiredDuplicates = () => {
+        const content = containerRef.current;
+        // the viewport ref is not yet initialized when the effect first runs
+        const viewport = content?.closest<HTMLElement>(
+          "[data-carousel-viewport]",
+        );
+        if (!viewport || !content) {
+          return;
+        }
+        const hasClones = !!content.querySelector("[data-loop-clone]");
+        let measurableNode = content;
+        if (hasClones) {
+          const cleanedContent = content.cloneNode(true) as typeof content;
+          cleanedContent
+            .querySelectorAll("[data-loop-clone]")
+            .forEach((c) => c.remove());
+          measurableNode = cleanedContent;
+          content.replaceWith(measurableNode);
+        }
+        const viewportWidth = viewport.getBoundingClientRect().width;
+        const contentWidth = measurableNode.getBoundingClientRect().width;
+        const toFill = viewportWidth - contentWidth;
+        if (toFill > 0) {
+          const duplicates = Math.ceil(toFill / contentWidth);
+          setDuplicates(duplicates);
+        } else {
+          setDuplicates(0);
+        }
+        if (hasClones) {
+          measurableNode.replaceWith(content);
+        }
+      };
+
+      const content = containerRef.current;
+      // the viewport ref is not yet initialized when the effect first runs
+      const viewport = content?.closest<HTMLElement>(
+        "[data-carousel-viewport]",
+      );
+      if (!viewport || !content) {
+        return;
+      }
+      const observer = new ResizeObserver(computeRequiredDuplicates);
+      observer.observe(viewport);
+      observer.observe(content);
+
+      return () => {
+        observer.disconnect();
+      };
+    }, []);
+
+    const duplicatedChildren =
+      loop && duplicates
+        ? Array(duplicates + 1)
+            .fill(0)
+            .flatMap((_, setIndex) =>
+              Children.toArray(children).map((child, i) =>
+                setIndex !== 0 && isValidElement(child)
+                  ? cloneElement(
+                      child as ReactElement<Record<string, unknown>>,
+                      {
+                        key: `carousel-loop-fill-duplicate-${setIndex}-${child.key ?? i}`,
+                        // "aria-hidden": setIndex === 1 ? undefined : true,
+                        // tabIndex: setIndex === 1 ? undefined : -1,
+                        "data-loop-clone": true,
+                      },
+                    )
+                  : child,
+              ),
+            )
+        : children;
+
+    const renderedChildren = loop
+      ? [0, 1, 2].flatMap((setIndex) =>
+          Children.toArray(duplicatedChildren).map((child, i) =>
+            setIndex !== 1 && isValidElement(child)
+              ? cloneElement(child as ReactElement<Record<string, unknown>>, {
+                  key: `carousel-loop-${setIndex}-${child.key ?? i}`,
+                  "aria-hidden": setIndex === 1 ? undefined : true,
+                  tabIndex: setIndex === 1 ? undefined : -1,
+                  "data-loop-clone": setIndex === 1 ? undefined : true,
+                })
+              : child,
+          ),
+        )
+      : children;
+
     return (
       <div
         {...props}
@@ -1311,7 +1411,7 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
         style={{ width: "fit-content", ...props.style }}
         data-carousel-content=""
       >
-        {children}
+        {renderedChildren}
       </div>
     );
   },
