@@ -51,6 +51,12 @@ const LOOP_RUNWAY = 3;
  * How long without a scroll event counts as the scroll having settled.
  */
 const SCROLL_IDLE_DELAY = 200;
+/**
+ * How long after a wheel event the browser still counts as running a scroll of
+ * its own. Momentum keeps the events coming, so this only has to cover the gap
+ * between two of them.
+ */
+const WHEEL_GESTURE_TIMEOUT = 250;
 const CSS_VARS = Object.freeze({
   fadeSize: "--carousel-fade-size",
   fadeOffsetBackwards: "--carousel-fade-offset-backwards",
@@ -106,6 +112,13 @@ type ScrollState = {
    * and still owes the user an animation to the position it asks for.
    */
   isWheelSnapSuspended: boolean;
+  /**
+   * When the last wheel event came in. A wheel scroll keeps sending them for as
+   * long as its momentum runs, so this says whether the browser is currently
+   * steering a scroll of its own — which is the only time the carousel has any
+   * business taking snapping away from it.
+   */
+  lastWheelTime: number;
 };
 
 type ScrollIntoView = (
@@ -304,18 +317,23 @@ const getIsChromium = () => {
  * after the content changed shape, the browser still holds on to the item it had
  * snapped to and will scroll back to it wherever we go. Toggling snapping makes
  * it let go and pick the item we actually landed on.
+ *
+ * That is a Chromium habit, and the toggle is kept for Chromium only: the other
+ * engines have no such attachment, and a style change on the scroller costs them
+ * the snap they were about to apply.
  */
 const setLoopScrollLeft = (
   container: HTMLElement,
   scrollLeft: number,
   { reselectSnapTarget = false }: { reselectSnapTarget?: boolean } = {},
 ) => {
+  const reselect = reselectSnapTarget && getIsChromium();
   const scrollSnapType = container.style.scrollSnapType;
-  if (reselectSnapTarget) {
+  if (reselect) {
     container.style.scrollSnapType = "none";
   }
   container.scrollTo({ left: scrollLeft, behavior: "instant" });
-  if (reselectSnapTarget) {
+  if (reselect) {
     container.style.scrollSnapType = scrollSnapType;
   }
 };
@@ -404,9 +422,13 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       if (!container) {
         return;
       }
-      // dragging and momentum turn snapping off while they run, give the user
-      // back the snapping they asked for now that nothing is animating
-      container.style.scrollSnapType = state.scrollSnapType;
+      // Dragging and momentum turn snapping off while they run, give the user
+      // back the snapping they asked for now that nothing is animating — unless
+      // a wrap has taken it over for a wheel scroll that is still going, in
+      // which case settleWheelSnap is the one that gives it back.
+      if (!state.isWheelSnapSuspended) {
+        container.style.scrollSnapType = state.scrollSnapType;
+      }
       container.style.removeProperty(CSS_VARS.overscrollTranslateX);
       const allItems = container.querySelectorAll(
         ":scope [data-carousel-content] > *",
@@ -869,6 +891,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       suppressLoopWrap: false,
       isPointerDown: false,
       isWheelSnapSuspended: false,
+      lastWheelTime: 0,
     });
     const loopMetricsRef = useRef<MaybeNull<LoopMetrics>>(null);
 
@@ -997,11 +1020,32 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       if (!shift) {
         return 0;
       }
+      // This jump is about to pull the ground out from under whatever scroll the
+      // browser is running. If that scroll is a wheel one it was steering
+      // towards a snap point, and losing that target goes badly: Safari swallows
+      // the rest of the momentum without moving, Firefox drops the snap it was
+      // going to end on. So the moment we disturb one, we take snapping off it
+      // and give it back ourselves once everything stops (see settleWheelSnap).
+      // Only then: a scroll that never runs out of content keeps the browser's
+      // own snapping from end to end. (In Chromium the wheel handler has already
+      // taken it, for reasons explained there, so this is a no-op.)
+      const isBrowserScrolling =
+        Date.now() - state.lastWheelTime < WHEEL_GESTURE_TIMEOUT;
+      const takesOverSnapping =
+        !!state.scrollSnapType &&
+        isBrowserScrolling &&
+        !state.isWheelSnapSuspended &&
+        !state.isDragging &&
+        state.animationId === null;
+      if (takesOverSnapping) {
+        state.isWheelSnapSuspended = true;
+        container.style.scrollSnapType = "none";
+      }
       // The item the browser had snapped to is now a whole set of copies away
-      // from the viewport. Left alone it holds on to it and, the next time it
-      // gets to snap, scrolls all the way back to it — content flying past for
-      // hundreds of milliseconds. Making it re-pick from where we land keeps it
-      // on the copy the user is actually looking at.
+      // from the viewport. Chromium holds on to it and, the next time it gets to
+      // snap, scrolls all the way back to it — content flying past for hundreds
+      // of milliseconds. Making it re-pick from where we land keeps it on the
+      // copy the user is actually looking at.
       setLoopScrollLeft(container, scrollLeft - shift, {
         reselectSnapTarget: true,
       });
@@ -1039,8 +1083,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
 
     /**
      * Asks the browser where it would snap to from where we are, without
-     * actually going there. Snapping is left off, the way the wheel scroll wants
-     * it — settleWheelSnap hands it back when it is done.
+     * actually going there. Snapping is left off, the way the interrupted scroll
+     * wants it — settleWheelSnap hands it back when it is done.
      */
     const getSnapPosition = useCallback((container: HTMLElement) => {
       const state = scrollStateRef.current;
@@ -1057,12 +1101,12 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     }, []);
 
     /**
-     * Gives back the snapping a wheel scroll had turned off, once that scroll
-     * has come to a stop: the carousel animates to the position the user's
-     * snapping asks for, and only then does the browser get to snap again.
-     * Animating it ourselves is the point — the browser would otherwise do it
-     * against the momentum it is still running, or against a target it picked
-     * before the carousel wrapped.
+     * Gives back the snapping a wrap had to take away, once the scroll it
+     * interrupted has come to a stop: the carousel animates to the position the
+     * user's snapping asks for, and only then does the browser get to snap
+     * again. Animating it ourselves is the point — the browser would otherwise
+     * do it against the momentum it is still running, or against the item it had
+     * snapped to before the wrap moved it a whole set of copies away.
      */
     const settleWheelSnap = useCallback(() => {
       const container = viewportRef.current;
@@ -1658,15 +1702,20 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         onWheel={(event) => {
           clearAnimation();
           const state = scrollStateRef.current;
+          state.lastWheelTime = Date.now();
+          // The browser is left to do its own snapping for as long as it is
+          // scrolling in peace, and the carousel only takes over once a wrap has
+          // moved the ground under it (see wrapLoopScroll). Chromium is the
+          // exception: it commits to a snap target when the gesture starts and
+          // steers towards it the whole way, so by the time a wrap comes it is
+          // already too late to take it off — the jump yanks the scroll back to
+          // a target that is now a set of copies away. There, the whole gesture
+          // runs unsnapped. Either way settleWheelSnap gives snapping back, and
+          // until it does nothing here puts it on again.
           if (state.scrollSnapType && getIsChromium()) {
-            // Chromium spends a wheel scroll steering towards the snap point it
-            // picked when the gesture began, and will not be talked out of it —
-            // not by the carousel wrapping, not by anything. It is easier to
-            // take snapping off for the duration and apply it ourselves once the
-            // momentum has run out (see settleWheelSnap).
             state.isWheelSnapSuspended = true;
             event.currentTarget.style.scrollSnapType = "none";
-          } else {
+          } else if (!state.isWheelSnapSuspended) {
             event.currentTarget.style.scrollSnapType = state.scrollSnapType;
           }
           onWheel?.(event);

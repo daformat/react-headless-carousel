@@ -890,43 +890,68 @@ describe("Carousel", () => {
       expect(vp.scrollLeft).toBe(middle);
     });
 
-    /**
-     * Chromium steers a wheel scroll towards the snap point it chose when the
-     * gesture started and will not let go of it, so the carousel takes snapping
-     * off for the duration and applies it itself once the momentum has run out.
-     */
-    const asChromium = () => {
-      Object.defineProperty(navigator, "userAgentData", {
-        value: { brands: [{ brand: "Chromium", version: "140" }] },
-        configurable: true,
-      });
+    /** Scrolls the wheel without going anywhere near the end of the content */
+    const wheelInPlace = (vp: HTMLElement) => {
+      fireEvent.wheel(vp, { deltaX: 120 });
+      fireEvent.scroll(vp);
     };
 
-    it("suspends snapping while a wheel scroll runs, in Chromium only", () => {
+    it("leaves the browser's own snapping alone for an ordinary wheel scroll", () => {
       vi.useFakeTimers();
       renderLoopCarousel({ scrollSnapType: "x mandatory" });
       const vp = getViewport();
 
-      asChromium();
-      fireEvent.wheel(vp, { deltaX: 120 });
-      expect(vp.style.scrollSnapType).toBe("none");
-
-      // ...and gives it back once the scroll has been quiet long enough for the
-      // momentum to be over
-      fireEvent.scroll(vp);
+      // nothing has been disturbed, so the browser snaps this one itself
+      wheelInPlace(vp);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
       vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
       expect(vp.style.scrollSnapType).toBe("x mandatory");
     });
 
-    it("leaves the snapping alone on a wheel scroll outside Chromium", () => {
+    it("runs the whole wheel gesture unsnapped in Chromium", () => {
+      vi.useFakeTimers();
       renderLoopCarousel({ scrollSnapType: "x mandatory" });
       const vp = getViewport();
+      // Chromium commits to a snap target when the gesture starts, so waiting
+      // for a wrap to take snapping off it would already be too late
       Object.defineProperty(navigator, "userAgentData", {
-        value: { brands: [{ brand: "WebKit", version: "620" }] },
+        value: { brands: [{ brand: "Chromium", version: "140" }] },
         configurable: true,
       });
 
+      wheelInPlace(vp);
+      expect(vp.style.scrollSnapType).toBe("none");
+
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+    });
+
+    it("takes snapping over when a wrap disturbs a wheel scroll, and gives it back", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+
+      // a wheel scroll long enough to run out of content: the wrap moves the
+      // ground under the browser, which leaves it steering towards a snap point
+      // that is now a whole set of copies away
       fireEvent.wheel(vp, { deltaX: 120 });
+      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      fireEvent.scroll(vp);
+      expect(vp.style.scrollSnapType).toBe("none");
+
+      // ...and it comes back once the scroll has been quiet long enough for the
+      // momentum to be over
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+    });
+
+    it("does not take snapping over from a wrap outside a wheel scroll", () => {
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+
+      // no wheel gesture in flight, so nothing of the browser's to protect
+      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      fireEvent.scroll(vp);
       expect(vp.style.scrollSnapType).toBe("x mandatory");
     });
 
@@ -934,13 +959,14 @@ describe("Carousel", () => {
       vi.useFakeTimers();
       renderLoopCarousel({ scrollSnapType: "x mandatory" });
       const vp = getViewport();
-      asChromium();
       fireEvent.wheel(vp, { deltaX: 120 });
+      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      fireEvent.scroll(vp);
       expect(vp.style.scrollSnapType).toBe("none");
 
       // taking hold of the carousel hands the scroll over to the drag, which
       // turns snapping off while it runs and lands on a snap point by itself —
-      // the wheel has no business putting it back under it
+      // the wheel take-over has no business putting it back under it
       fireEvent.pointerDown(vp, {
         pointerType: "mouse",
         pointerId: 1,
