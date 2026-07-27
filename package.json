@@ -27,6 +27,7 @@
     "lint:js": "eslint .",
     "lint:js:fix": "eslint --fix .",
     "local-release": "changeset version && changeset publish",
+    "playground": "vite --config .playground/vite.config.ts",
     "prepublishOnly": "npm run ci",
     "test": "vitest run"
   },
@@ -71,6 +72,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^6.0.2",
+    "vite": "^8.0.2",
     "vitest": "^4.1.1"
   }
 }
