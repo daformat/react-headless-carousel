@@ -117,6 +117,141 @@ beforeEach(() => {
   });
 });
 
+/**
+ * jsdom has no layout engine, and both the loop and the autoplay need one:
+ * they measure how far apart the items are to know where to go. This installs
+ * a minimal horizontal layout on the prototypes — a viewport VIEWPORT_WIDTH
+ * wide, holding items of ITEM_WIDTH laid out one after the other from the
+ * start of the content — and has to be in place *before* rendering, since the
+ * carousel measures itself in a layout effect.
+ */
+const ITEM_WIDTH = 100;
+const VIEWPORT_WIDTH = 300;
+const patchedKeys = [
+  "scrollLeft",
+  "scrollWidth",
+  "clientWidth",
+  "offsetWidth",
+  "getBoundingClientRect",
+  "scrollTo",
+] as const;
+const originalDescriptors = new Map<
+  string,
+  MaybeUndefined<PropertyDescriptor>
+>();
+
+const isViewport = (el: HTMLElement) =>
+  el.hasAttribute("data-carousel-viewport");
+const isItem = (el: HTMLElement) => el.hasAttribute("data-carousel-item");
+const getViewportOf = (el: HTMLElement) =>
+  isViewport(el) ? el : el.closest<HTMLElement>("[data-carousel-viewport]");
+const getContentWidth = (viewport: HTMLElement) => {
+  const content = viewport.querySelector("[data-carousel-content]");
+  return (content?.children.length ?? 0) * ITEM_WIDTH;
+};
+
+/**
+ * jsdom has no layout engine, and the loop needs one: it measures how far
+ * apart two copies of the children are to know its repetition period. This
+ * installs a minimal horizontal layout on the prototypes — a viewport
+ * VIEWPORT_WIDTH wide, holding items of ITEM_WIDTH laid out one after the
+ * other from the start of the content — and has to be in place *before*
+ * rendering, since the carousel measures itself in a layout effect.
+ */
+const stubLayout = () => {
+  const scrollPositions = new WeakMap<HTMLElement, number>();
+  const patch = (key: string, descriptor: PropertyDescriptor) => {
+    originalDescriptors.set(
+      key,
+      Object.getOwnPropertyDescriptor(HTMLElement.prototype, key),
+    );
+    Object.defineProperty(HTMLElement.prototype, key, {
+      ...descriptor,
+      configurable: true,
+      // methods have to stay writable so a test can put a spy over one
+      ...("value" in descriptor ? { writable: true } : {}),
+    });
+  };
+
+  patch("scrollLeft", {
+    get(this: HTMLElement) {
+      return scrollPositions.get(this) ?? 0;
+    },
+    set(this: HTMLElement, value: number) {
+      // browsers clamp the scroll position to the scrollable range
+      const maxScroll = Math.max(0, this.scrollWidth - this.clientWidth);
+      scrollPositions.set(this, Math.max(0, Math.min(value, maxScroll)));
+    },
+  });
+  patch("scrollWidth", {
+    get(this: HTMLElement) {
+      return isViewport(this) ? getContentWidth(this) : 0;
+    },
+  });
+  patch("clientWidth", {
+    get(this: HTMLElement) {
+      return isViewport(this) ? VIEWPORT_WIDTH : 0;
+    },
+  });
+  patch("offsetWidth", {
+    get(this: HTMLElement) {
+      return isViewport(this) ? VIEWPORT_WIDTH : isItem(this) ? ITEM_WIDTH : 0;
+    },
+  });
+  patch("getBoundingClientRect", {
+    value(this: HTMLElement) {
+      const viewport = getViewportOf(this);
+      const scrollLeft = viewport?.scrollLeft ?? 0;
+      let left = 0;
+      let width = 0;
+      if (viewport === this) {
+        width = VIEWPORT_WIDTH;
+      } else if (isItem(this) && this.parentElement) {
+        const index = Array.prototype.indexOf.call(
+          this.parentElement.children,
+          this,
+        );
+        left = index * ITEM_WIDTH - scrollLeft;
+        width = ITEM_WIDTH;
+      } else if (viewport) {
+        left = -scrollLeft;
+        width = getContentWidth(viewport);
+      }
+      return {
+        x: left,
+        y: 0,
+        left,
+        right: left + width,
+        top: 0,
+        bottom: 0,
+        width,
+        height: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+    },
+  });
+  patch("scrollTo", {
+    value(this: HTMLElement, options?: ScrollToOptions | number) {
+      const left = typeof options === "number" ? options : options?.left;
+      if (left !== undefined) {
+        this.scrollLeft = left;
+      }
+    },
+  });
+};
+
+const restoreLayout = () => {
+  patchedKeys.forEach((key) => {
+    const descriptor = originalDescriptors.get(key);
+    if (descriptor) {
+      Object.defineProperty(HTMLElement.prototype, key, descriptor);
+    } else {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+    }
+  });
+  originalDescriptors.clear();
+};
+
 // --- Tests ---
 
 describe("Carousel", () => {
@@ -611,140 +746,9 @@ describe("Carousel", () => {
   });
 
   describe("loop", () => {
-    const ITEM_WIDTH = 100;
-    const VIEWPORT_WIDTH = 300;
     const CHILDREN_COUNT = 5;
     /** width of a single copy of the children */
     const NATURAL_WIDTH = ITEM_WIDTH * CHILDREN_COUNT;
-
-    const patchedKeys = [
-      "scrollLeft",
-      "scrollWidth",
-      "clientWidth",
-      "offsetWidth",
-      "getBoundingClientRect",
-      "scrollTo",
-    ] as const;
-    const originalDescriptors = new Map<
-      string,
-      MaybeUndefined<PropertyDescriptor>
-    >();
-
-    const isViewport = (el: HTMLElement) =>
-      el.hasAttribute("data-carousel-viewport");
-    const isItem = (el: HTMLElement) => el.hasAttribute("data-carousel-item");
-    const getViewportOf = (el: HTMLElement) =>
-      isViewport(el) ? el : el.closest<HTMLElement>("[data-carousel-viewport]");
-    const getContentWidth = (viewport: HTMLElement) => {
-      const content = viewport.querySelector("[data-carousel-content]");
-      return (content?.children.length ?? 0) * ITEM_WIDTH;
-    };
-
-    /**
-     * jsdom has no layout engine, and the loop needs one: it measures how far
-     * apart two copies of the children are to know its repetition period. This
-     * installs a minimal horizontal layout on the prototypes — a viewport
-     * VIEWPORT_WIDTH wide, holding items of ITEM_WIDTH laid out one after the
-     * other from the start of the content — and has to be in place *before*
-     * rendering, since the carousel measures itself in a layout effect.
-     */
-    const stubLayout = () => {
-      const scrollPositions = new WeakMap<HTMLElement, number>();
-      const patch = (key: string, descriptor: PropertyDescriptor) => {
-        originalDescriptors.set(
-          key,
-          Object.getOwnPropertyDescriptor(HTMLElement.prototype, key),
-        );
-        Object.defineProperty(HTMLElement.prototype, key, {
-          ...descriptor,
-          configurable: true,
-        });
-      };
-
-      patch("scrollLeft", {
-        get(this: HTMLElement) {
-          return scrollPositions.get(this) ?? 0;
-        },
-        set(this: HTMLElement, value: number) {
-          // browsers clamp the scroll position to the scrollable range
-          const maxScroll = Math.max(0, this.scrollWidth - this.clientWidth);
-          scrollPositions.set(this, Math.max(0, Math.min(value, maxScroll)));
-        },
-      });
-      patch("scrollWidth", {
-        get(this: HTMLElement) {
-          return isViewport(this) ? getContentWidth(this) : 0;
-        },
-      });
-      patch("clientWidth", {
-        get(this: HTMLElement) {
-          return isViewport(this) ? VIEWPORT_WIDTH : 0;
-        },
-      });
-      patch("offsetWidth", {
-        get(this: HTMLElement) {
-          return isViewport(this)
-            ? VIEWPORT_WIDTH
-            : isItem(this)
-              ? ITEM_WIDTH
-              : 0;
-        },
-      });
-      patch("getBoundingClientRect", {
-        value(this: HTMLElement) {
-          const viewport = getViewportOf(this);
-          const scrollLeft = viewport?.scrollLeft ?? 0;
-          let left = 0;
-          let width = 0;
-          if (viewport === this) {
-            width = VIEWPORT_WIDTH;
-          } else if (isItem(this) && this.parentElement) {
-            const index = Array.prototype.indexOf.call(
-              this.parentElement.children,
-              this,
-            );
-            left = index * ITEM_WIDTH - scrollLeft;
-            width = ITEM_WIDTH;
-          } else if (viewport) {
-            left = -scrollLeft;
-            width = getContentWidth(viewport);
-          }
-          return {
-            x: left,
-            y: 0,
-            left,
-            right: left + width,
-            top: 0,
-            bottom: 0,
-            width,
-            height: 0,
-            toJSON: () => ({}),
-          } as DOMRect;
-        },
-      });
-      patch("scrollTo", {
-        value(this: HTMLElement, options?: ScrollToOptions | number) {
-          const left = typeof options === "number" ? options : options?.left;
-          if (left !== undefined) {
-            this.scrollLeft = left;
-          }
-        },
-      });
-    };
-
-    const restoreLayout = () => {
-      patchedKeys.forEach((key) => {
-        const descriptor = originalDescriptors.get(key);
-        if (descriptor) {
-          Object.defineProperty(HTMLElement.prototype, key, descriptor);
-        } else {
-          delete (HTMLElement.prototype as unknown as Record<string, unknown>)[
-            key
-          ];
-        }
-      });
-      originalDescriptors.clear();
-    };
 
     const renderLoopCarousel = (
       viewportProps: Partial<Parameters<typeof Carousel.Viewport>[0]> = {},
@@ -1004,6 +1008,212 @@ describe("Carousel", () => {
         (screen.getByRole("button", { name: "next" }) as HTMLButtonElement)
           .disabled,
       ).toBe(false);
+    });
+  });
+
+  describe("autoplay", () => {
+    // the carousel has to be able to see where its items are to step between
+    // them, and be laid out before it is rendered
+    beforeEach(stubLayout);
+    afterEach(restoreLayout);
+
+    const getRoot = () =>
+      document.querySelector("[data-carousel-autoplay]") as HTMLElement;
+
+    /**
+     * Renders an autoplaying carousel with a spy on the scrolling so its steps
+     * can be counted. The scroll geometry matches the stubbed layout — five
+     * items of ITEM_WIDTH in a VIEWPORT_WIDTH viewport — so that where the
+     * carousel thinks the items are and how far it thinks it can go agree.
+     *
+     * Looping is off: a looping carousel re-centres itself on a timer of its
+     * own, which would scroll the viewport behind the autoplay's back and there
+     * would be no telling which of the two a scroll came from.
+     */
+    const renderAutoplay = (
+      autoplay: Parameters<typeof Carousel.Root>[0]["autoplay"],
+      { scrollLeft = 0 } = {},
+    ) => {
+      const result = renderCarousel({}, { autoplay, loop: false });
+      const vp = getViewport();
+      stubViewportLayout(vp, {
+        scrollLeft,
+        scrollWidth: ITEM_WIDTH * 5,
+        offsetWidth: VIEWPORT_WIDTH,
+      });
+      // let the carousel read how much room it has left
+      fireEvent.scroll(vp);
+      return { ...result, vp };
+    };
+
+    it("does not run at all unless it is asked for", () => {
+      renderCarousel();
+      expect(getRoot()).toBeNull();
+    });
+
+    it("reports that it is playing on the root", () => {
+      vi.useFakeTimers();
+      renderAutoplay({ mode: "item", interval: 1000 });
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+    });
+
+    it("steps on its own every interval", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+
+      expect(vp.scrollTo).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1000);
+      expect(vp.scrollTo).toHaveBeenCalled();
+    });
+
+    it("pauses while the pointer is over the carousel", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+      const root = getRoot();
+
+      fireEvent.mouseEnter(root);
+      expect(root.dataset.carouselAutoplay).toBe("paused");
+      vi.advanceTimersByTime(3000);
+      expect(vp.scrollTo).not.toHaveBeenCalled();
+
+      fireEvent.mouseLeave(root);
+      expect(root.dataset.carouselAutoplay).toBe("playing");
+      vi.advanceTimersByTime(1000);
+      expect(vp.scrollTo).toHaveBeenCalled();
+    });
+
+    it("pauses while the focus is inside the carousel", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+      const root = getRoot();
+      const item = document.querySelector(
+        "[data-carousel-item]",
+      ) as HTMLElement;
+
+      // focusin bubbles, so focusing an item counts as focusing the carousel
+      fireEvent.focusIn(item);
+      expect(root.dataset.carouselAutoplay).toBe("paused");
+      vi.advanceTimersByTime(3000);
+      expect(vp.scrollTo).not.toHaveBeenCalled();
+
+      fireEvent.focusOut(item);
+      expect(root.dataset.carouselAutoplay).toBe("playing");
+      vi.advanceTimersByTime(1000);
+      expect(vp.scrollTo).toHaveBeenCalled();
+    });
+
+    it("stays out of the way while the user is dragging", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+
+      fireEvent.pointerDown(vp, {
+        pointerType: "mouse",
+        pointerId: 1,
+        clientX: 0,
+      });
+      vi.advanceTimersByTime(3000);
+      expect(vp.scrollTo).not.toHaveBeenCalled();
+    });
+
+    it("stays out of the way while a wheel scroll is still running", () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "setInterval", "clearTimeout"],
+      });
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+
+      fireEvent.wheel(vp, { deltaX: 120 });
+      vi.advanceTimersByTime(1000);
+      expect(vp.scrollTo).not.toHaveBeenCalled();
+    });
+
+    describe("running out of content, without loop", () => {
+      /** Parks a non-looping carousel at the very end of its content */
+      const renderAtTheEnd = (
+        atEnd: "rewind" | "reverse" | "stop" | undefined,
+      ) => {
+        // max scrollLeft = five items (500) - the viewport (300)
+        const { vp } = renderAutoplay(
+          { mode: "item", interval: 1000, atEnd },
+          { scrollLeft: ITEM_WIDTH * 5 - VIEWPORT_WIDTH },
+        );
+        return vp;
+      };
+
+      it("goes back to the beginning by default", () => {
+        vi.useFakeTimers();
+        const vp = renderAtTheEnd(undefined);
+
+        vi.advanceTimersByTime(1000);
+        expect(vp.scrollTo).toHaveBeenCalledWith(
+          expect.objectContaining({ left: 0 }),
+        );
+        expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+      });
+
+      it("turns around and plays back when asked to reverse", () => {
+        vi.useFakeTimers();
+        const vp = renderAtTheEnd("reverse");
+
+        vi.advanceTimersByTime(1000);
+        // it did not rewind to the start, and it is still going
+        expect(vp.scrollTo).not.toHaveBeenCalledWith(
+          expect.objectContaining({ left: 0 }),
+        );
+        expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+
+        // the step after the turn goes the other way
+        vi.advanceTimersByTime(1000);
+        expect(vp.scrollTo).toHaveBeenCalled();
+      });
+
+      it("sits still at the end before turning around, when asked to", () => {
+        vi.useFakeTimers();
+        // continuous mode runs on animation frames, so drive them by hand
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal(
+          "requestAnimationFrame",
+          vi.fn((cb: FrameRequestCallback) => frames.push(cb)),
+        );
+        const { vp } = renderAutoplay(
+          {
+            mode: "continuous",
+            speed: 100,
+            atEnd: "reverse",
+            pauseAtEnd: 500,
+          },
+          { scrollLeft: ITEM_WIDTH * 5 - VIEWPORT_WIDTH },
+        );
+        const atTheEnd = vp.scrollLeft;
+        // the loop measures how long a frame took, so the first one it sees
+        // only starts the clock
+        const nextFrame = (time: number) => frames[frames.length - 1]?.(time);
+        nextFrame(100);
+
+        // it has arrived and there is nowhere left to go: the wait starts here
+        nextFrame(116);
+        expect(vp.scrollLeft).toBe(atTheEnd);
+
+        // still sitting there
+        vi.advanceTimersByTime(499);
+        nextFrame(132);
+        expect(vp.scrollLeft).toBe(atTheEnd);
+
+        // the wait is over: it turns round and plays back the way it came
+        vi.advanceTimersByTime(1);
+        nextFrame(148);
+        nextFrame(164);
+        expect(vp.scrollLeft).toBeLessThan(atTheEnd);
+        expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+      });
+
+      it("gives up when asked to stop", () => {
+        vi.useFakeTimers();
+        const vp = renderAtTheEnd("stop");
+
+        vi.advanceTimersByTime(3000);
+        expect(vp.scrollTo).not.toHaveBeenCalled();
+        expect(getRoot()).toBeNull();
+      });
     });
   });
 

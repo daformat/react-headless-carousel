@@ -370,16 +370,137 @@ const recenterLoopScroll = (container: HTMLElement) => {
   return container.scrollLeft - scrollLeft;
 };
 
-type CarouselRootProps = {
-  loop?: boolean;
+type CarouselAutoplayBase = {
+  direction?: "forwards" | "backwards";
+  /** Pause while the pointer is over the carousel. On by default */
+  pauseOnHover?: boolean;
+  /** Pause while the focus is anywhere inside the carousel. On by default */
+  pauseOnFocus?: boolean;
+};
+
+/**
+ * What to do when the carousel runs out of content. Only offered to a carousel
+ * that can: a looping one tops itself back up long before it reaches an end, so
+ * there is never an end to handle — see CarouselRootProps, which is what decides
+ * whether these are on the table.
+ */
+type CarouselAutoplayAtEnd = {
+  /**
+   * `rewind` goes back to the end it started from and carries on, `reverse`
+   * turns around and plays back the way it came, `stop` leaves it there.
+   * Rewinds by default.
+   */
+  atEnd?: "rewind" | "reverse" | "stop";
+};
+
+/**
+ * The options that are not on offer in a given shape are typed as the reason
+ * why, rather than as `never`: assigning to one then has the compiler quote the
+ * reason back — "Type 'number' is not assignable to type '`speed` is for
+ * mode: continuous...'" — which says considerably more than "not assignable to
+ * type 'undefined'".
+ */
+type NoSpeed =
+  "`speed` is for mode: 'continuous' — stepping takes `interval` instead";
+type NoInterval =
+  "`interval` is for mode: 'item' and mode: 'page' — a continuous scroll takes `speed` instead";
+type NoPauseAtEndHere = "`pauseAtEnd` is for mode: 'continuous'";
+type NoAtEnd =
+  "`atEnd` needs loop={false} — a looping carousel never runs out of content";
+type NoPauseAtEnd =
+  "`pauseAtEnd` needs loop={false} — a looping carousel never reaches an end to wait at";
+
+/**
+ * `CanEnd` says whether the carousel is one that can run out of content, which
+ * is the only time the `atEnd` options mean anything.
+ */
+type CarouselAutoplayOptions<CanEnd extends boolean = false> =
+  | (CarouselAutoplayBase & {
+      /** Scrolls the viewport at a steady speed, without stopping on items */
+      mode: "continuous";
+      /** How fast to scroll, in pixels per second. Defaults to 60 */
+      speed?: number;
+      interval?: NoInterval;
+    } & (CanEnd extends true
+        ? CarouselAutoplayAtEnd & {
+            /**
+             * How long to sit still on reaching the end — or the start, on the
+             * way back — before `atEnd` turns it around or takes it home, in
+             * milliseconds. Turns straight around by default.
+             */
+            pauseAtEnd?: number;
+          }
+        : { atEnd?: NoAtEnd; pauseAtEnd?: NoPauseAtEnd }))
+  | (CarouselAutoplayBase & {
+      /**
+       * Steps to the next item, or to the next viewport worth of them — a page
+       * being the same move the prev / next buttons make. Items by default.
+       */
+      mode?: "item" | "page";
+      /** How long to wait between steps, in milliseconds. Defaults to 3000 */
+      interval?: number;
+      speed?: NoSpeed;
+      pauseAtEnd?: NoPauseAtEndHere;
+    } & (CanEnd extends true ? CarouselAutoplayAtEnd : { atEnd?: NoAtEnd }));
+
+/** Every autoplay option, whichever way the props narrowed them */
+type ResolvedAutoplayOptions = CarouselAutoplayBase &
+  CarouselAutoplayAtEnd & {
+    mode?: "continuous" | "item" | "page";
+    speed?: number;
+    interval?: number;
+    pauseAtEnd?: number;
+  };
+
+type CarouselRootBaseProps = {
   boundaryOffset?:
     | { x: number; y: number }
     | ((root: HTMLElement) => { x: number; y: number });
 } & ComponentPropsWithoutRef<"div">;
 
+/**
+ * Which autoplay options are on offer depends on `loop`: a looping carousel
+ * never runs out of content, so the `atEnd` options would sit there doing
+ * nothing. Rather than accept them and quietly ignore them, they are only part
+ * of the type when the carousel can actually reach an end.
+ */
+type CarouselRootProps =
+  | (CarouselRootBaseProps & {
+      loop?: true;
+      /**
+       * Scrolls the carousel on its own. `true` steps to the next item every
+       * three seconds; pass an object to choose how and how fast.
+       */
+      autoplay?: boolean | CarouselAutoplayOptions;
+    })
+  | (CarouselRootBaseProps & {
+      loop: false;
+      /**
+       * Scrolls the carousel on its own. `true` steps to the next item every
+       * three seconds; pass an object to choose how and how fast, and what to
+       * do once it runs out of content.
+       */
+      autoplay?: boolean | CarouselAutoplayOptions<true>;
+    })
+  | (CarouselRootBaseProps & {
+      /**
+       * Looping decided at runtime. The `atEnd` options are off the table: this
+       * carousel may well never reach an end. Narrow `loop` to a literal to get
+       * at them.
+       */
+      loop: boolean;
+      autoplay?: boolean | CarouselAutoplayOptions;
+    });
+
 const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
   (
-    { boundaryOffset = defaultBoundaryOffset, loop = true, children, ...props },
+    {
+      boundaryOffset = defaultBoundaryOffset,
+      loop = false,
+      autoplay = false,
+      children,
+      ...props
+    },
     forwardedRef,
   ) => {
     const [viewportRef, setViewportRef] = useState<
@@ -766,6 +887,339 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       viewportRef,
       scrollIntoView,
       scrollStateRef,
+    ]);
+
+    /**
+     * Moves by exactly one item. This is not what the prev / next buttons do:
+     * those move by a viewport worth of items at a time, which is why they are
+     * called pages.
+     */
+    const scrollToAdjacentItem = useCallback(
+      (direction: "forwards" | "backwards") => {
+        const container = viewportRef?.current;
+        const root = rootRef.current;
+        if (!container || !root) {
+          return;
+        }
+        if (loop) {
+          // start from the middle of the repeated content, so the scroll we are
+          // about to animate cannot run out of content and be cut short by a wrap
+          recenterLoopScroll(container);
+        }
+        const items = Array.from(
+          container.querySelectorAll(":scope [data-carousel-content] > *"),
+        ) as HTMLElement[];
+        const { x: offsetX } = getBoundaryOffset(boundaryOffset, root);
+        // the item the viewport currently starts on: the first one that has not
+        // been scrolled past
+        const index = items.findIndex(
+          (item) =>
+            getOffsetLeft(item, container) + item.offsetWidth >
+            container.scrollLeft + offsetX + 1,
+        );
+        const target = items[index + (direction === "forwards" ? 1 : -1)];
+        if (index >= 0 && target) {
+          // "forwards" here is the edge to line the item up against, not the
+          // way we are going: stepping either way parks it at the start
+          scrollIntoView(target, container, "forwards");
+        }
+      },
+      [boundaryOffset, loop, scrollIntoView, viewportRef],
+    );
+
+    // Read the autoplay options out one at a time rather than handing the object
+    // to the effect: it is nearly always written inline, so its identity changes
+    // on every render and the effect would spend its life being torn down and
+    // set back up — restarting the animation and thrashing scroll-snap-type
+    // several times a second.
+    // The options a given shape does not offer are typed as the reason why, so
+    // that the compiler quotes it back at whoever passes one (see NoAtEnd and
+    // friends). None of them can get this far, so read the lot as what they
+    // actually are.
+    const autoplayConfig = (
+      typeof autoplay === "object" ? autoplay : {}
+    ) as ResolvedAutoplayOptions;
+    const autoplayEnabled = autoplay !== false;
+    const autoplayMode = autoplayConfig.mode ?? "item";
+    const autoplaySpeed =
+      autoplayConfig.mode === "continuous" ? (autoplayConfig.speed ?? 60) : 60;
+    const autoplayInterval =
+      autoplayConfig.mode === "continuous"
+        ? 3000
+        : (autoplayConfig.interval ?? 3000);
+    const autoplayPauseAtEnd =
+      autoplayConfig.mode === "continuous"
+        ? (autoplayConfig.pauseAtEnd ?? 0)
+        : 0;
+    const autoplayDirection = autoplayConfig.direction ?? "forwards";
+    const autoplayAtEnd = autoplayConfig.atEnd ?? "rewind";
+    const autoplayPauseOnHover = autoplayConfig.pauseOnHover ?? true;
+    const autoplayPauseOnFocus = autoplayConfig.pauseOnFocus ?? true;
+
+    /**
+     * Scrolls the carousel on its own, and gets out of the way the moment
+     * anything else wants the scroll: the pointer resting on it, the focus
+     * moving into it, a drag, a wheel, or a momentum still running.
+     */
+    useEffect(() => {
+      const root = rootRef.current;
+      const state = scrollStateRef?.current;
+      if (!autoplayEnabled || !root || !state) {
+        return;
+      }
+      const reducedMotion = window.matchMedia?.(
+        "(prefers-reduced-motion: reduce)",
+      );
+
+      /** everything with a claim on the scroll, by name so they can stack */
+      const pausedBy = new Set<string>();
+      let frame: MaybeNull<number> = null;
+      let timer: MaybeUndefined<ReturnType<typeof setInterval>> = undefined;
+      let lastFrameTime = 0;
+      /** which way we are going: `atEnd: "reverse"` turns this around */
+      let sign = autoplayDirection === "backwards" ? -1 : 1;
+      /** where a rewind is heading, while it is on its way there */
+      let rewindingTo: MaybeNull<number> = null;
+      /** running while we sit at the end, before `atEnd` takes over */
+      let endPause: MaybeUndefined<ReturnType<typeof setTimeout>> = undefined;
+
+      /** the user is doing something with the carousel: leave it alone */
+      const isBusy = () =>
+        state.isDragging ||
+        state.isPointerDown ||
+        state.animationId !== null ||
+        Date.now() - state.lastWheelTime < WHEEL_GESTURE_TIMEOUT;
+
+      const canAdvance = () => {
+        if (loop) {
+          return true;
+        }
+        const remaining =
+          sign > 0 ? remainingForwards.current : remainingBackwards.current;
+        return remaining > 1;
+      };
+
+      /**
+       * Still on the way back to the end we came from, so leave the scroll to
+       * the animation doing the rewinding.
+       */
+      const isRewinding = () => {
+        const container = viewportRef.current;
+        if (rewindingTo === null || !container) {
+          return false;
+        }
+        if (Math.abs(container.scrollLeft - rewindingTo) <= 1) {
+          rewindingTo = null;
+          lastFrameTime = 0;
+          return false;
+        }
+        return true;
+      };
+
+      /** Turn around, or go back to the end we started from */
+      const applyAtEnd = () => {
+        const container = viewportRef.current;
+        if (!container) {
+          return;
+        }
+        if (autoplayAtEnd === "reverse") {
+          sign = -sign;
+          lastFrameTime = 0;
+          return;
+        }
+        rewindingTo =
+          sign > 0 ? 0 : container.scrollWidth - container.clientWidth;
+        container.scrollTo({ left: rewindingTo, behavior: "smooth" });
+      };
+
+      /**
+       * A carousel that does not loop has run out of content. Sit there for a
+       * moment if asked to — running headlong into the end and turning round in
+       * the same frame reads as a bounce — then turn around, go back to the end
+       * we started from, or call it a day.
+       */
+      const handleEnd = () => {
+        const container = viewportRef.current;
+        // nowhere to go in either direction: there is nothing to play
+        if (
+          !container ||
+          autoplayAtEnd === "stop" ||
+          (remainingForwards.current <= 1 && remainingBackwards.current <= 1)
+        ) {
+          stop();
+          return;
+        }
+        if (!autoplayPauseAtEnd) {
+          applyAtEnd();
+          return;
+        }
+        // the frames keep coming while we sit here, so only ever wait once
+        if (endPause === undefined) {
+          endPause = setTimeout(() => {
+            endPause = undefined;
+            applyAtEnd();
+          }, autoplayPauseAtEnd);
+        }
+      };
+
+      /** give the scroll back to the browser, snapping and all */
+      const releaseScroll = () => {
+        const container = viewportRef.current;
+        if (
+          container &&
+          autoplayMode === "continuous" &&
+          !state.isWheelSnapSuspended
+        ) {
+          container.style.scrollSnapType = state.scrollSnapType;
+        }
+      };
+
+      const setPaused = (reason: string, paused: boolean) => {
+        const wasPaused = pausedBy.size > 0;
+        if (paused) {
+          pausedBy.add(reason);
+        } else {
+          pausedBy.delete(reason);
+        }
+        const isPaused = pausedBy.size > 0;
+        if (isPaused !== wasPaused) {
+          root.dataset.carouselAutoplay = isPaused ? "paused" : "playing";
+          if (isPaused) {
+            // hand snapping back so the carousel settles onto an item while the
+            // user has it, rather than sitting between two of them
+            releaseScroll();
+          } else {
+            lastFrameTime = 0;
+          }
+        }
+      };
+
+      const scrollContinuously = (time: number) => {
+        frame = requestAnimationFrame(scrollContinuously);
+        const container = viewportRef.current;
+        const elapsed = lastFrameTime ? time - lastFrameTime : 0;
+        lastFrameTime = time;
+        if (
+          !container ||
+          pausedBy.size > 0 ||
+          isBusy() ||
+          !elapsed ||
+          isRewinding()
+        ) {
+          // someone else is driving: pick up their position rather than carrying
+          // on from where we left off
+          if (container) {
+            state.scrollLeft = container.scrollLeft;
+          }
+          return;
+        }
+        if (!canAdvance()) {
+          handleEnd();
+          return;
+        }
+        // snapping would pull every frame back onto the nearest item, which is
+        // the opposite of scrolling continuously
+        container.style.scrollSnapType = "none";
+        state.scrollLeft += (sign * autoplaySpeed * elapsed) / 1000;
+        container.scrollLeft = state.scrollLeft;
+      };
+
+      const step = () => {
+        if (pausedBy.size > 0 || isBusy() || isRewinding()) {
+          return;
+        }
+        if (!canAdvance()) {
+          handleEnd();
+          return;
+        }
+        const direction = sign > 0 ? "forwards" : "backwards";
+        if (autoplayMode === "page") {
+          // the same move the prev / next buttons make
+          if (sign > 0) {
+            handleScrollToNext();
+          } else {
+            handleScrollToPrev();
+          }
+        } else {
+          scrollToAdjacentItem(direction);
+        }
+      };
+
+      const stop = () => {
+        if (frame !== null) {
+          cancelAnimationFrame(frame);
+          frame = null;
+        }
+        clearInterval(timer);
+        timer = undefined;
+        clearTimeout(endPause);
+        endPause = undefined;
+        rewindingTo = null;
+        releaseScroll();
+        delete root.dataset.carouselAutoplay;
+      };
+
+      const start = () => {
+        stop();
+        if (reducedMotion?.matches) {
+          // things moving about on their own is the first thing someone asking
+          // for reduced motion does not want
+          return;
+        }
+        root.dataset.carouselAutoplay =
+          pausedBy.size > 0 ? "paused" : "playing";
+        lastFrameTime = 0;
+        if (autoplayMode === "continuous") {
+          frame = requestAnimationFrame(scrollContinuously);
+        } else {
+          timer = setInterval(step, autoplayInterval);
+        }
+      };
+
+      const pauseHover = () => setPaused("hover", true);
+      const resumeHover = () => setPaused("hover", false);
+      const pauseFocus = () => setPaused("focus", true);
+      const resumeFocus = () => setPaused("focus", false);
+      const handleVisibility = () =>
+        setPaused("hidden", document.visibilityState === "hidden");
+
+      start();
+      if (autoplayPauseOnHover) {
+        root.addEventListener("mouseenter", pauseHover);
+        root.addEventListener("mouseleave", resumeHover);
+      }
+      if (autoplayPauseOnFocus) {
+        root.addEventListener("focusin", pauseFocus);
+        root.addEventListener("focusout", resumeFocus);
+      }
+      document.addEventListener("visibilitychange", handleVisibility);
+      reducedMotion?.addEventListener("change", start);
+
+      return () => {
+        stop();
+        root.removeEventListener("mouseenter", pauseHover);
+        root.removeEventListener("mouseleave", resumeHover);
+        root.removeEventListener("focusin", pauseFocus);
+        root.removeEventListener("focusout", resumeFocus);
+        document.removeEventListener("visibilitychange", handleVisibility);
+        reducedMotion?.removeEventListener("change", start);
+      };
+    }, [
+      autoplayAtEnd,
+      autoplayDirection,
+      autoplayEnabled,
+      autoplayInterval,
+      autoplayMode,
+      autoplayPauseAtEnd,
+      autoplayPauseOnFocus,
+      autoplayPauseOnHover,
+      autoplaySpeed,
+      handleScrollToNext,
+      handleScrollToPrev,
+      loop,
+      scrollStateRef,
+      scrollToAdjacentItem,
+      viewportRef,
     ]);
 
     const carouselContext = useMemo<CarouselContext>(() => {
