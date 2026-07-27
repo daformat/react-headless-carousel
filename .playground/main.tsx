@@ -24,7 +24,9 @@ const Demo = ({
   useEffect(() => {
     const id = setInterval(() => {
       const vp = document.querySelector<HTMLElement>(`#vp-${label}`);
-      if (!vp) return;
+      if (!vp) {
+        return;
+      }
       const content = vp.querySelector<HTMLElement>("[data-carousel-content]")!;
       setInfo(
         JSON.stringify({
