@@ -799,6 +799,58 @@ describe("Carousel", () => {
       );
     });
 
+    /** The same carousel, rendered with looping on or off */
+    const loopSwitch = (loop: boolean) => (
+      <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop={loop}>
+        <Carousel.Viewport>
+          <Carousel.Content>
+            {Array.from({ length: CHILDREN_COUNT }, (_, i) => (
+              <Carousel.Item key={i}>
+                <div>Item {i}</div>
+              </Carousel.Item>
+            ))}
+          </Carousel.Content>
+        </Carousel.Viewport>
+      </Carousel.Root>
+    );
+
+    /** Which item is against the leading edge, and how far into it we are */
+    const viewAtEdge = (vp: HTMLElement) => {
+      const items = Array.from(
+        vp.querySelectorAll("[data-carousel-item]"),
+      ) as HTMLElement[];
+      const index = Math.floor(vp.scrollLeft / ITEM_WIDTH);
+      return {
+        label: items[index]?.textContent,
+        into: vp.scrollLeft % ITEM_WIDTH,
+      };
+    };
+
+    it("keeps the same items in view when looping is turned on", () => {
+      const { rerender } = render(loopSwitch(false));
+      const vp = getViewport();
+      // part-way through the third item
+      vp.scrollLeft = ITEM_WIDTH * 2 + 40;
+      const before = viewAtEdge(vp);
+
+      rerender(loopSwitch(true));
+      expect(viewAtEdge(vp)).toEqual(before);
+    });
+
+    it("keeps the same items in view when looping is turned off", () => {
+      const { rerender } = render(loopSwitch(true));
+      const vp = getViewport();
+      // Somewhere in a copy a long way from the originals, but at an offset the
+      // carousel can still reach once it is only as long as its children: five
+      // items of ITEM_WIDTH in a VIEWPORT_WIDTH viewport stop at 200.
+      vp.scrollLeft = NATURAL_WIDTH * 3 + ITEM_WIDTH + 50;
+      fireEvent.scroll(vp);
+      const before = viewAtEdge(vp);
+
+      rerender(loopSwitch(false));
+      expect(viewAtEdge(vp)).toEqual(before);
+    });
+
     it("does not touch the scroll position when looping is off", () => {
       renderCarousel();
       expect(getViewport().scrollLeft).toBe(0);
@@ -894,6 +946,14 @@ describe("Carousel", () => {
       expect(vp.scrollLeft).toBe(middle);
     });
 
+    /** Chromium is the one engine that needs the whole gesture unsnapped */
+    const asChromium = () => {
+      Object.defineProperty(navigator, "userAgentData", {
+        value: { brands: [{ brand: "Chromium", version: "140" }] },
+        configurable: true,
+      });
+    };
+
     /** Scrolls the wheel without going anywhere near the end of the content */
     const wheelInPlace = (vp: HTMLElement) => {
       fireEvent.wheel(vp, { deltaX: 120 });
@@ -918,15 +978,55 @@ describe("Carousel", () => {
       const vp = getViewport();
       // Chromium commits to a snap target when the gesture starts, so waiting
       // for a wrap to take snapping off it would already be too late
-      Object.defineProperty(navigator, "userAgentData", {
-        value: { brands: [{ brand: "Chromium", version: "140" }] },
-        configurable: true,
-      });
+      asChromium();
 
       wheelInPlace(vp);
       expect(vp.style.scrollSnapType).toBe("none");
 
       vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+    });
+
+    it("never takes snapping over from a carousel that does not loop", () => {
+      vi.useFakeTimers();
+      asChromium();
+      // no loop means nothing will ever move the ground under the browser, so
+      // it is left to snap the way it always would — even in Chromium
+      renderCarousel({ scrollSnapType: "x mandatory" }, { loop: false });
+      const vp = getViewport();
+
+      wheelInPlace(vp);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+    });
+
+    it("hands snapping back when looping is turned off mid-scroll", () => {
+      vi.useFakeTimers();
+      asChromium();
+      const { rerender } = renderLoopCarousel({
+        scrollSnapType: "x mandatory",
+      });
+      const vp = getViewport();
+
+      wheelInPlace(vp);
+      expect(vp.style.scrollSnapType).toBe("none");
+
+      // React will not put the style back on its own — it has no idea we wrote
+      // to the one it set — so turning looping off has to hand snapping over
+      rerender(
+        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop={false}>
+          <Carousel.Viewport scrollSnapType="x mandatory">
+            <Carousel.Content>
+              {Array.from({ length: 5 }, (_, i) => (
+                <Carousel.Item key={i}>
+                  <div>Item {i}</div>
+                </Carousel.Item>
+              ))}
+            </Carousel.Content>
+          </Carousel.Viewport>
+        </Carousel.Root>,
+      );
       expect(vp.style.scrollSnapType).toBe("x mandatory");
     });
 
@@ -1066,6 +1166,22 @@ describe("Carousel", () => {
       expect(vp.scrollTo).toHaveBeenCalled();
     });
 
+    it("passes over an item it is practically already on", () => {
+      vi.useFakeTimers();
+      // parked just short of the second item's resting place: stepping onto it
+      // would move 40px of a 100px item, which nobody would see as a step
+      const { vp } = renderAutoplay(
+        { mode: "item", interval: 1000 },
+        { scrollLeft: ITEM_WIDTH - 40 },
+      );
+
+      vi.advanceTimersByTime(1000);
+      // so it goes to the one after instead
+      expect(vp.scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({ left: ITEM_WIDTH * 2 }),
+      );
+    });
+
     it("pauses while the pointer is over the carousel", () => {
       vi.useFakeTimers();
       const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
@@ -1098,6 +1214,19 @@ describe("Carousel", () => {
 
       fireEvent.focusOut(item);
       expect(root.dataset.carouselAutoplay).toBe("playing");
+      vi.advanceTimersByTime(1000);
+      expect(vp.scrollTo).toHaveBeenCalled();
+    });
+
+    it("keeps playing when something outside the viewport takes focus", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+      // the prev / next buttons, and whatever else a carousel is built with,
+      // sit alongside the viewport and hold focus long after being clicked
+      const button = screen.getByRole("button", { name: "next" });
+
+      fireEvent.focusIn(button);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
       vi.advanceTimersByTime(1000);
       expect(vp.scrollTo).toHaveBeenCalled();
     });

@@ -10,6 +10,7 @@ const Demo = ({
   snap,
   width,
   autoplay,
+  align = "start",
 }: {
   label: string;
   count: number;
@@ -17,6 +18,7 @@ const Demo = ({
   snap?: string;
   width?: number;
   autoplay?: boolean | Record<string, unknown>;
+  align?: "start" | "center" | "end";
 }) => {
   const [info, setInfo] = useState("");
   useEffect(() => {
@@ -55,7 +57,7 @@ const Demo = ({
                 key={i}
                 className="item"
                 style={{
-                  scrollSnapAlign: snap ? "start" : undefined,
+                  scrollSnapAlign: snap ? align : undefined,
                   width: width ?? 160,
                 }}
               >
@@ -72,8 +74,21 @@ const Demo = ({
   );
 };
 
+const Toggle = () => {
+  const [loop, setLoop] = useState(true);
+  return (
+    <div>
+      <button id="toggle-loop" onClick={() => setLoop((v) => !v)}>
+        loop: {String(loop)}
+      </button>
+      <Demo label="toggle" count={6} loop={loop} snap="x mandatory" />
+    </div>
+  );
+};
+
 createRoot(document.getElementById("root")!).render(
   <>
+    <Toggle />
     <Demo label="loop-snap" count={6} loop snap="x mandatory" />
     <Demo label="loop-nosnap" count={6} loop />
     <Demo label="loop-few" count={2} loop snap="x mandatory" />
@@ -115,6 +130,22 @@ createRoot(document.getElementById("root")!).render(
         atEnd: "reverse",
         pauseAtEnd: 1500,
       }}
+    />
+    <Demo
+      label="auto-center"
+      count={6}
+      loop={false}
+      snap="x mandatory"
+      align="center"
+      autoplay={{ mode: "item", interval: 900 }}
+    />
+    <Demo
+      label="auto-end"
+      count={6}
+      loop={false}
+      snap="x mandatory"
+      align="end"
+      autoplay={{ mode: "item", interval: 900 }}
     />
     <Demo
       label="auto-stop"
