@@ -406,9 +406,9 @@ type NoInterval =
   "`interval` is for mode: 'item' and mode: 'page' — a continuous scroll takes `speed` instead";
 type NoPauseAtEndHere = "`pauseAtEnd` is for mode: 'continuous'";
 type NoAtEnd =
-  "`atEnd` needs loop={false} — a looping carousel never runs out of content";
+  "`atEnd` does not apply with loop — a looping carousel never runs out of content";
 type NoPauseAtEnd =
-  "`pauseAtEnd` needs loop={false} — a looping carousel never reaches an end to wait at";
+  "`pauseAtEnd` does not apply with loop — a looping carousel never reaches an end to wait at";
 
 /**
  * `CanEnd` says whether the carousel is one that can run out of content, which
@@ -466,21 +466,22 @@ type CarouselRootBaseProps = {
  */
 type CarouselRootProps =
   | (CarouselRootBaseProps & {
-      loop?: true;
-      /**
-       * Scrolls the carousel on its own. `true` steps to the next item every
-       * three seconds; pass an object to choose how and how fast.
-       */
-      autoplay?: boolean | CarouselAutoplayOptions;
-    })
-  | (CarouselRootBaseProps & {
-      loop: false;
+      /** Off by default: the carousel runs out of content at either end */
+      loop?: false;
       /**
        * Scrolls the carousel on its own. `true` steps to the next item every
        * three seconds; pass an object to choose how and how fast, and what to
        * do once it runs out of content.
        */
       autoplay?: boolean | CarouselAutoplayOptions<true>;
+    })
+  | (CarouselRootBaseProps & {
+      loop: true;
+      /**
+       * Scrolls the carousel on its own. `true` steps to the next item every
+       * three seconds; pass an object to choose how and how fast.
+       */
+      autoplay?: boolean | CarouselAutoplayOptions;
     })
   | (CarouselRootBaseProps & {
       /**

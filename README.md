@@ -66,7 +66,7 @@ The outermost wrapper. Provides context to all child carousel components. Render
 
 | Prop             | Type                                                                            | Default                 | Description                                                                                                                                                                                                                                                                                                                                              |
 | ---------------- | ------------------------------------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `loop`           | `boolean`                                                                       | `true`                  | Renders copies of the children on either side and wraps the scroll position, so the carousel never reaches an end. See [Looping](#looping).                                                                                                                                                                                                              |
+| `loop`           | `boolean`                                                                       | `false`                 | Renders copies of the children on either side and wraps the scroll position, so the carousel never reaches an end. See [Looping](#looping).                                                                                                                                                                                                              |
 | `autoplay`       | `boolean \| AutoplayOptions`                                                    | `false`                 | Scrolls the carousel on its own. `true` steps to the next item every three seconds; pass an object to choose how and how fast. See [Autoplay](#autoplay).                                                                                                                                                                                                |
 | `boundaryOffset` | `{ x: number; y: number } \| ((root: HTMLElement) => { x: number; y: number })` | `defaultBoundaryOffset` | Inset in pixels from the leading and trailing edges of the viewport used when scrolling items into view with prev/next buttons. The default implementation reads the content fade size from the viewport so items are never scrolled behind the fade. Pass a plain object or a function receiving the root element and returning `{ x, y }` to override. |
 | `ref`            | `Ref<HTMLDivElement>`                                                           | —                       | Forwarded ref to the root `<div>`.                                                                                                                                                                                                                                                                                                                       |
@@ -74,7 +74,7 @@ The outermost wrapper. Provides context to all child carousel components. Render
 
 #### Looping
 
-`loop` makes the carousel endless in both directions. It renders the children three times over — plus however many extra
+`loop` is off by default. Turning it on makes the carousel endless in both directions: it renders the children three times over — plus however many extra
 copies it takes for one of those sets to cover a few viewports — and teleports the scroll position back by a whole
 number of copies whenever it comes close to running out. The position it leaves and the one it lands on show the same pixels, so
 the jump itself is not visible.
@@ -103,7 +103,7 @@ real children — and when the scroll settles the carousel comes home to them.
 <Carousel.Root autoplay />
 <Carousel.Root autoplay={{ mode: "continuous", speed: 90 }} />
 <Carousel.Root autoplay={{ mode: "page", interval: 5000 }} />
-<Carousel.Root loop={false} autoplay={{ mode: "continuous", atEnd: "reverse", pauseAtEnd: 1500 }} />
+<Carousel.Root autoplay={{ mode: "continuous", atEnd: "reverse", pauseAtEnd: 1500 }} />
 ```
 
 | Option         | Type                               | Default      | Description                                                                                                                                           |
@@ -112,13 +112,13 @@ real children — and when the scroll settles the carousel comes home to them.
 | `direction`    | `"forwards" \| "backwards"`        | `"forwards"` | Which way to go.                                                                                                                                      |
 | `interval`     | `number`                           | `3000`       | Milliseconds between steps. `item` and `page` only.                                                                                                   |
 | `speed`        | `number`                           | `60`         | Pixels per second. `continuous` only.                                                                                                                 |
-| `atEnd`        | `"rewind" \| "reverse" \| "stop"`  | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. `loop={false}` only.                    |
-| `pauseAtEnd`   | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` and `loop={false}` only.                                                |
+| `atEnd`        | `"rewind" \| "reverse" \| "stop"`  | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. Not available with `loop`.              |
+| `pauseAtEnd`   | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with `loop`.                                              |
 | `pauseOnHover` | `boolean`                          | `true`       | Pause while the pointer is over the carousel.                                                                                                         |
 | `pauseOnFocus` | `boolean`                          | `true`       | Pause while the focus is anywhere inside the carousel, items included.                                                                                |
 
 The options that do not apply to a given configuration are compile errors rather than settings that quietly do nothing,
-and the type carries the reason: hovering `atEnd` on a looping carousel says it needs `loop={false}`, since a looping
+and the type carries the reason: hovering `atEnd` on a looping carousel says it does not apply there, since a looping
 carousel never runs out of content. Mixing up `speed` and `interval` puts that explanation in the error itself.
 
 Beyond `pauseOnHover` and `pauseOnFocus`, autoplay also gets out of the way on its own while you are dragging, while a
