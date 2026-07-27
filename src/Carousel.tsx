@@ -6,7 +6,6 @@ import {
   type CSSProperties,
   type ForwardedRef,
   forwardRef,
-  Fragment,
   isValidElement,
   type ReactElement,
   type RefObject,
