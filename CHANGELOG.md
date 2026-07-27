@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.1.0
+
+### Minor Changes
+
+- 242d8ab: Add loop and autoplay
+
 ## 1.0.21
 
 ### Patch Changes
