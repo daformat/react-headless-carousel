@@ -32,6 +32,25 @@ import type { MaybeNull, MaybeUndefined } from "./utils/maybe.js";
 const FRAME_DURATION = 16;
 const RUBBER_BAND_BOUNCE_COEFFICIENT = 40;
 const MAX_DISTANCE_FOR_CLICK = 3;
+/**
+ * How many times the content is repeated when looping: one set before and one
+ * set after the original children, so there is always something to scroll to on
+ * both sides before we wrap back to the middle.
+ */
+const LOOP_SETS = 3;
+/**
+ * How many viewports a single set has to cover (the children are duplicated
+ * until they do). Wrapping teleports the scroll position, which cancels whatever
+ * the browser was animating and makes it repaint content it had not rasterized,
+ * so we trade a bit of DOM for wraps that happen as rarely as possible: this
+ * leaves a fling three viewports of room backwards and five forwards before it
+ * can run out of content.
+ */
+const LOOP_RUNWAY = 3;
+/**
+ * How long without a scroll event counts as the scroll having settled.
+ */
+const SCROLL_IDLE_DELAY = 200;
 const CSS_VARS = Object.freeze({
   fadeSize: "--carousel-fade-size",
   fadeOffsetBackwards: "--carousel-fade-offset-backwards",
@@ -70,6 +89,23 @@ type ScrollState = {
   scrollSnapType: string;
   cachedScrollWidth: number;
   cachedOffsetWidth: number;
+  /**
+   * Set while we probe the browser for snap positions: probing moves the scroll
+   * position around before restoring it, which must not be mistaken for the
+   * user reaching the end of the looped content.
+   */
+  suppressLoopWrap: boolean;
+  /**
+   * Whether a pointer is currently down, whatever its type. A touch scroll is
+   * driven by the finger, so the scroll can look idle while the gesture is very
+   * much still going.
+   */
+  isPointerDown: boolean;
+  /**
+   * Whether snapping is currently turned off for the benefit of a wheel scroll,
+   * and still owes the user an animation to the position it asks for.
+   */
+  isWheelSnapSuspended: boolean;
 };
 
 type ScrollIntoView = (
@@ -159,6 +195,163 @@ const getOffsetLeft = (element: HTMLElement, container: HTMLElement): number =>
   container.getBoundingClientRect().left +
   container.scrollLeft;
 
+type LoopMetrics = {
+  /**
+   * Distance between two consecutive copies of the children — gaps, margins and
+   * any other spacing included. The content repeats itself every naturalWidth,
+   * which makes it the period we can shift the scroll position by without the
+   * user noticing anything.
+   */
+  naturalWidth: number;
+  /**
+   * Width of one of the LOOP_SETS rendered sets (a whole number of copies).
+   * Also the scroll position of the first original child, since it opens the
+   * middle set.
+   */
+  setWidth: number;
+};
+
+/**
+ * Measures the repetition period of a looping carousel straight from the laid
+ * out DOM. Every set holds the same markup, so both distances can be read from
+ * the position of the items opening each repetition.
+ */
+const measureLoopMetrics = (container: HTMLElement): MaybeNull<LoopMetrics> => {
+  const content = container.querySelector<HTMLElement>(
+    ":scope [data-carousel-content]",
+  );
+  const childrenCount = Number(
+    content?.getAttribute("data-carousel-loop-size") ?? 0,
+  );
+  if (!content || !childrenCount) {
+    return null;
+  }
+  const items = content.children;
+  // every set renders the same markup, so this always divides evenly
+  if (!items.length || items.length % LOOP_SETS !== 0) {
+    return null;
+  }
+  const itemsPerSet = items.length / LOOP_SETS;
+  const first = items[0];
+  const nextCopy = items[childrenCount];
+  const nextSet = items[itemsPerSet];
+  if (
+    !(first instanceof HTMLElement) ||
+    !(nextCopy instanceof HTMLElement) ||
+    !(nextSet instanceof HTMLElement)
+  ) {
+    return null;
+  }
+  const firstLeft = getOffsetLeft(first, container);
+  const naturalWidth = getOffsetLeft(nextCopy, container) - firstLeft;
+  const setWidth = getOffsetLeft(nextSet, container) - firstLeft;
+  if (naturalWidth <= 0 || setWidth <= 0) {
+    return null;
+  }
+  return { naturalWidth, setWidth };
+};
+
+/**
+ * Returns the multiple of the loop period that brings the given scroll position
+ * back to the copy of the children the carousel calls home — the original ones,
+ * which open the middle set. Since every copy is identical, shifting a scroll
+ * position by that amount is visually undetectable; what it buys is a full set
+ * of content to scroll through backwards and two forwards.
+ *
+ * Homing in on the originals rather than on the middle of the scrollable range
+ * also means the children that are actually exposed to assistive technology are
+ * the ones on screen whenever the carousel comes to a rest.
+ */
+const getLoopShift = (scrollLeft: number, metrics: LoopMetrics) =>
+  Math.round((scrollLeft - metrics.setWidth) / metrics.naturalWidth) *
+  metrics.naturalWidth;
+
+/**
+ * Chromium drives a wheel scroll towards the snap point it picked when the
+ * gesture started, and holds on to that target across anything else that moves
+ * the position — including the jump a looping carousel makes when it runs out of
+ * content. It then scrolls all the way back to it, which is very much visible.
+ * Firefox and Safari do not do this, so they are left alone.
+ */
+const getIsChromium = () => {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  const brands = (
+    navigator as Navigator & {
+      userAgentData?: { brands?: { brand: string }[] };
+    }
+  ).userAgentData?.brands;
+  return brands
+    ? brands.some(({ brand }) => brand === "Chromium")
+    : /Chrome|Chromium|Edg\/|OPR\//.test(navigator.userAgent) &&
+        !/Firefox/.test(navigator.userAgent);
+};
+
+/**
+ * Instantly jumps the scroll position, whatever `scroll-behavior` the page asked
+ * for.
+ *
+ * Snapping is otherwise left alone: turning it off and back on around the jump
+ * forces the browser to re-snap, and a browser asked to re-snap in the middle of
+ * a fling picks its target from where that fling was heading — nowhere near
+ * where we just moved to — which shows up as the carousel flying across its
+ * whole content before settling. It does not need the help anyway: every
+ * position we jump to sits a whole number of copies away from the one we left,
+ * so it lines up with the snap points exactly the same way.
+ *
+ * `reselectSnapTarget` is for the one case where it does need the help: right
+ * after the content changed shape, the browser still holds on to the item it had
+ * snapped to and will scroll back to it wherever we go. Toggling snapping makes
+ * it let go and pick the item we actually landed on.
+ */
+const setLoopScrollLeft = (
+  container: HTMLElement,
+  scrollLeft: number,
+  { reselectSnapTarget = false }: { reselectSnapTarget?: boolean } = {},
+) => {
+  const scrollSnapType = container.style.scrollSnapType;
+  if (reselectSnapTarget) {
+    container.style.scrollSnapType = "none";
+  }
+  container.scrollTo({ left: scrollLeft, behavior: "instant" });
+  if (reselectSnapTarget) {
+    container.style.scrollSnapType = scrollSnapType;
+  }
+};
+
+/**
+ * Takes the scroll position back home — onto the original children — and returns
+ * the delta it applied. This is what tops the content back up on both sides so
+ * the carousel can keep being scrolled in either direction, and it is free as
+ * long as nothing is moving: the content repeats, so the same pixels stay on
+ * screen, and a resting position stays snapped exactly where the user left it.
+ *
+ * Doing it while the browser is animating a scroll would cancel that animation,
+ * so callers are expected to only do it once things have settled.
+ */
+const recenterLoopScroll = (container: HTMLElement) => {
+  const metrics = measureLoopMetrics(container);
+  if (!metrics) {
+    return 0;
+  }
+  const scrollLeft = container.scrollLeft;
+  // No need to move for every little scroll: home has a whole set of content
+  // behind it and two ahead, so letting the carousel drift a quarter of a set
+  // still leaves the tighter side of it more than two viewports to scroll.
+  if (Math.abs(scrollLeft - metrics.setWidth) <= metrics.setWidth / 4) {
+    return 0;
+  }
+  const shift = getLoopShift(scrollLeft, metrics);
+  if (!shift) {
+    return 0;
+  }
+  setLoopScrollLeft(container, scrollLeft - shift, {
+    reselectSnapTarget: true,
+  });
+  return container.scrollLeft - scrollLeft;
+};
+
 type CarouselRootProps = {
   loop?: boolean;
   boundaryOffset?:
@@ -211,6 +404,9 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       if (!container) {
         return;
       }
+      // dragging and momentum turn snapping off while they run, give the user
+      // back the snapping they asked for now that nothing is animating
+      container.style.scrollSnapType = state.scrollSnapType;
       container.style.removeProperty(CSS_VARS.overscrollTranslateX);
       const allItems = container.querySelectorAll(
         ":scope [data-carousel-content] > *",
@@ -292,12 +488,21 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
      */
     const snapScroll = useCallback(
       (targetScroll: number, container: HTMLElement) => {
+        const state = scrollStateRef?.current;
         const currentScroll = container.scrollLeft;
-        container.style.scrollSnapType =
-          scrollStateRef?.current?.scrollSnapType ?? "";
+        if (state) {
+          // this is a ref, although it's in a state to be able to pass it around,
+          // it is safe to mutate it, using the setter would cause unwanted re-renders
+          // eslint-disable-next-line react-hooks/immutability
+          state.suppressLoopWrap = true;
+        }
+        container.style.scrollSnapType = state?.scrollSnapType ?? "";
         container.scrollTo({ left: targetScroll, behavior: "instant" });
         const snappedScrollPosition = container.scrollLeft;
         container.scrollTo({ left: currentScroll, behavior: "instant" });
+        if (state) {
+          state.suppressLoopWrap = false;
+        }
         return snappedScrollPosition;
       },
       [scrollStateRef],
@@ -359,8 +564,14 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
           const maxIterations = 20;
           // Adjust scroll position to account for snapping, if the target is
           // still before or after, we increment / decrement the scroll position
-          container.style.scrollSnapType =
-            scrollStateRef?.current?.scrollSnapType ?? "";
+          const state = scrollStateRef?.current;
+          if (state) {
+            // this is a ref, although it's in a state to be able to pass it around,
+            // it is safe to mutate it, using the setter would cause unwanted re-renders
+            // eslint-disable-next-line react-hooks/immutability
+            state.suppressLoopWrap = true;
+          }
+          container.style.scrollSnapType = state?.scrollSnapType ?? "";
           while (
             scrollPosition > 0 &&
             scrollPosition < container.scrollWidth - container.offsetWidth &&
@@ -382,6 +593,9 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
             iterations++;
           }
           container.scrollTo({ left: currentScroll, behavior: "instant" });
+          if (state) {
+            state.suppressLoopWrap = false;
+          }
           snappedScrollTo(
             scrollPosition <= offset ? 0 : scrollPosition,
             container,
@@ -433,6 +647,11 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
         // eslint-disable-next-line react-hooks/immutability
         container.style.scrollSnapType =
           scrollStateRef?.current?.scrollSnapType ?? "";
+        if (loop) {
+          // start from the middle of the repeated content, so the scroll we are
+          // about to animate cannot run out of content and be cut short by a wrap
+          recenterLoopScroll(container);
+        }
         const items = Array.from(
           container.querySelectorAll(":scope [data-carousel-content] > *"),
         ) as HTMLElement[];
@@ -465,6 +684,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       boundaryOffset,
       clearAnimation,
       handleScrollPage,
+      loop,
       viewportRef,
       scrollIntoView,
       scrollStateRef,
@@ -477,12 +697,18 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       clearAnimation();
       const container = viewportRef?.current;
       const root = rootRef?.current;
-      if (root && container && container.scrollLeft > 0) {
+      // when looping there is always something before the current position
+      if (root && container && (loop || container.scrollLeft > 0)) {
         // this is a ref, although it's in a state to be able to pass it around,
         // it is safe to mutate it, using the setter would cause unwanted re-renders
         // eslint-disable-next-line react-hooks/immutability
         container.style.scrollSnapType =
           scrollStateRef?.current?.scrollSnapType ?? "";
+        if (loop) {
+          // start from the middle of the repeated content, so the scroll we are
+          // about to animate cannot run out of content and be cut short by a wrap
+          recenterLoopScroll(container);
+        }
         const items = Array.from(
           container.querySelectorAll(":scope [data-carousel-content] > *"),
         ) as HTMLElement[];
@@ -514,6 +740,7 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
       boundaryOffset,
       clearAnimation,
       handleScrollPage,
+      loop,
       viewportRef,
       scrollIntoView,
       scrollStateRef,
@@ -639,7 +866,11 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       scrollSnapType: scrollSnapType ?? "",
       cachedScrollWidth: 0,
       cachedOffsetWidth: 0,
+      suppressLoopWrap: false,
+      isPointerDown: false,
+      isWheelSnapSuspended: false,
     });
+    const loopMetricsRef = useRef<MaybeNull<LoopMetrics>>(null);
 
     // Keep the ref in sync with the prop on every render so event handlers
     // always see the current value without needing a layout effect.
@@ -679,6 +910,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         if (!container || containerScrollWidth <= containerOffsetWidth) {
           setScrollsBackwards(false);
           setScrollsForwards(false);
+        } else if (loop) {
+          // a looping carousel never runs out of content on either side
+          setScrollsBackwards(true);
+          setScrollsForwards(true);
         } else if (containerScrollLeft <= 0) {
           setScrollsBackwards(false);
           setScrollsForwards(true);
@@ -711,11 +946,152 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     }, [
       rootRef,
       boundaryOffset,
+      loop,
       setRemainingBackwards,
       setRemainingForwards,
       setScrollsBackwards,
       setScrollsForwards,
     ]);
+
+    /**
+     * Returns the repetition period of the looped content, measuring it again
+     * whenever the content or the viewport changed since the last measure.
+     */
+    const getLoopMetrics = useCallback(() => {
+      const container = viewportRef.current;
+      if (!loop || !container) {
+        return null;
+      }
+      if (!loopMetricsRef.current) {
+        loopMetricsRef.current = measureLoopMetrics(container);
+      }
+      return loopMetricsRef.current;
+    }, [loop]);
+
+    /**
+     * Last resort: teleports the scroll position back home when it comes within
+     * a viewport of either end, so that a gesture long enough to eat through the
+     * whole runway still cannot reach the end of the content. Both the position
+     * we leave and the one we land on show the exact same pixels, so the jump
+     * itself cannot be seen, but it does cut short whatever the browser was
+     * animating — hence keeping it for the cases the settled recentering below
+     * could not prevent. Returns the applied delta.
+     */
+    const wrapLoopScroll = useCallback(() => {
+      const container = viewportRef.current;
+      const state = scrollStateRef.current;
+      const metrics = getLoopMetrics();
+      if (!container || !metrics || state.suppressLoopWrap) {
+        return 0;
+      }
+      const margin = container.clientWidth;
+      const maxScroll = container.scrollWidth - container.clientWidth;
+      const scrollLeft = container.scrollLeft;
+      if (
+        maxScroll <= margin * 2 ||
+        (scrollLeft > margin && scrollLeft < maxScroll - margin)
+      ) {
+        return 0;
+      }
+      const shift = getLoopShift(scrollLeft, metrics);
+      if (!shift) {
+        return 0;
+      }
+      // The item the browser had snapped to is now a whole set of copies away
+      // from the viewport. Left alone it holds on to it and, the next time it
+      // gets to snap, scrolls all the way back to it — content flying past for
+      // hundreds of milliseconds. Making it re-pick from where we land keeps it
+      // on the copy the user is actually looking at.
+      setLoopScrollLeft(container, scrollLeft - shift, {
+        reselectSnapTarget: true,
+      });
+      // the drag and momentum baselines track the scroll position themselves,
+      // teleport them along with it
+      const delta = container.scrollLeft - scrollLeft;
+      state.scrollLeft += delta;
+      return delta;
+    }, [getLoopMetrics]);
+
+    /**
+     * Recenters the looped content once everything has come to a stop. This is
+     * where most of the wrapping happens: doing it here costs nothing, whereas
+     * teleporting mid-scroll cancels whatever the browser was animating — a
+     * snap, a smooth scroll — and reads as the carousel stuttering or ignoring
+     * a click.
+     */
+    const settleLoopScroll = useCallback(() => {
+      const container = viewportRef.current;
+      const state = scrollStateRef.current;
+      if (
+        !loop ||
+        !container ||
+        state.suppressLoopWrap ||
+        state.isDragging ||
+        state.isPointerDown ||
+        // our own momentum is still running the show
+        state.animationId !== null
+      ) {
+        return;
+      }
+      loopMetricsRef.current = null;
+      state.scrollLeft += recenterLoopScroll(container);
+    }, [loop]);
+
+    /**
+     * Asks the browser where it would snap to from where we are, without
+     * actually going there. Snapping is left off, the way the wheel scroll wants
+     * it — settleWheelSnap hands it back when it is done.
+     */
+    const getSnapPosition = useCallback((container: HTMLElement) => {
+      const state = scrollStateRef.current;
+      const scrollLeft = container.scrollLeft;
+      state.suppressLoopWrap = true;
+      container.style.scrollSnapType = state.scrollSnapType;
+      // a scroll has to actually go somewhere for the browser to snap it
+      container.scrollTo({ left: scrollLeft + 1, behavior: "instant" });
+      const snapped = container.scrollLeft;
+      container.style.scrollSnapType = "none";
+      container.scrollTo({ left: scrollLeft, behavior: "instant" });
+      state.suppressLoopWrap = false;
+      return snapped;
+    }, []);
+
+    /**
+     * Gives back the snapping a wheel scroll had turned off, once that scroll
+     * has come to a stop: the carousel animates to the position the user's
+     * snapping asks for, and only then does the browser get to snap again.
+     * Animating it ourselves is the point — the browser would otherwise do it
+     * against the momentum it is still running, or against a target it picked
+     * before the carousel wrapped.
+     */
+    const settleWheelSnap = useCallback(() => {
+      const container = viewportRef.current;
+      const state = scrollStateRef.current;
+      if (
+        !container ||
+        !state.isWheelSnapSuspended ||
+        state.isDragging ||
+        state.isPointerDown ||
+        // a momentum of ours lands on a snap point by itself
+        state.animationId !== null
+      ) {
+        return;
+      }
+      const scrollLeft = container.scrollLeft;
+      const snapped = getSnapPosition(container);
+      if (Math.abs(snapped - scrollLeft) > 1) {
+        // still snapping off, so nothing pulls at the animation. It scrolls,
+        // which brings us back here once it in turn goes quiet.
+        container.scrollTo({ left: snapped, behavior: "smooth" });
+        return;
+      }
+      state.isWheelSnapSuspended = false;
+      // We are on the snap point already. Writing the position one last time
+      // before handing snapping back is what makes the browser adopt the item
+      // we are on rather than the one it was holding on to.
+      container.scrollTo({ left: scrollLeft, behavior: "instant" });
+      container.style.scrollSnapType = state.scrollSnapType;
+    }, [getSnapPosition]);
 
     /**
      * Prevent native scroll when dragging
@@ -725,36 +1101,15 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     }, []);
 
     /**
-     * Set up observers and scrolling event listeners to update the scroll state.
-     */
-    useLayoutEffect(() => {
-      const container = viewportRef.current;
-      if (container) {
-        const resizeObserver = new ResizeObserver(updateScrollState);
-        const mutationObserver = new MutationObserver(updateScrollState);
-        resizeObserver.observe(container);
-        mutationObserver.observe(container, {
-          attributes: true,
-          childList: true,
-          subtree: true,
-        });
-        container.addEventListener("scroll", updateScrollState);
-        updateScrollState();
-        return () => {
-          resizeObserver.disconnect();
-          mutationObserver.disconnect();
-          container.removeEventListener("scroll", updateScrollState);
-        };
-      }
-      return;
-    }, [updateScrollState]);
-
-    /**
      * Initialize dragging.
      */
     const handlePointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
         scrollStateRef.current.lastPointerType = event.pointerType;
+        scrollStateRef.current.isPointerDown = true;
+        // dragging looks after its own snapping, from here on the wheel has no
+        // say in it
+        scrollStateRef.current.isWheelSnapSuspended = false;
         if (event.pointerType !== "mouse" || event.button !== 0) {
           return;
         }
@@ -875,20 +1230,25 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           state.mouseDirection = direction;
         }
         container.scrollLeft = state.scrollLeft + scrollDelta;
+        // wrap right away rather than waiting for the scroll event, so the next
+        // move is computed from the position we actually ended up on
+        wrapLoopScroll();
         state.lastX = event.clientX;
         state.lastTime = currentTime;
 
+        // a looping carousel has no boundary to bounce against
         if (
-          container.scrollLeft <= 1 ||
-          container.scrollLeft >=
-            container.scrollWidth - container.offsetWidth - 1
+          !loop &&
+          (container.scrollLeft <= 1 ||
+            container.scrollLeft >=
+              container.scrollWidth - container.offsetWidth - 1)
         ) {
           applyRubberBanding(container, scrollDelta);
           clampVelocity(maxAbsoluteVelocity);
         }
         onPointerMove?.(event);
       },
-      [applyRubberBanding, clampVelocity, onPointerMove],
+      [applyRubberBanding, clampVelocity, loop, onPointerMove, wrapLoopScroll],
     );
 
     /**
@@ -906,12 +1266,18 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       ) => {
         const state = scrollStateRef.current;
 
-        // Find where the browser would snap to at tFinalScroll
+        // Find where the browser would snap to at tFinalScroll. When looping,
+        // the momentum can aim past the rendered content: probing an equivalent
+        // in-range position gives the same answer, one period away.
+        const metrics = getLoopMetrics();
+        const probeShift = metrics ? getLoopShift(tFinalScroll, metrics) : 0;
+        state.suppressLoopWrap = true;
         container.style.scrollSnapType = state.scrollSnapType;
-        container.scrollLeft = tFinalScroll;
-        const snappedScroll = container.scrollLeft;
+        container.scrollLeft = tFinalScroll - probeShift;
+        const snappedScroll = container.scrollLeft + probeShift;
         container.style.scrollSnapType = "none";
         container.scrollLeft = initialScroll;
+        state.suppressLoopWrap = false;
 
         const { finalScroll, iterations } = getFinalScroll(
           initialScroll,
@@ -942,7 +1308,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           state.velocityX,
         );
       },
-      [],
+      [getLoopMetrics],
     );
 
     /**
@@ -953,10 +1319,12 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       (container: HTMLDivElement, minVelocity: number) => {
         const minVelocityForSnapping = 0;
         const state = scrollStateRef.current;
+        // a looping carousel has no boundary to bounce against
         const isRubberBanding =
-          container.scrollLeft <= 1 ||
-          container.scrollLeft >=
-            state.cachedScrollWidth - state.cachedOffsetWidth - 1;
+          !loop &&
+          (container.scrollLeft <= 1 ||
+            container.scrollLeft >=
+              state.cachedScrollWidth - state.cachedOffsetWidth - 1);
         const rubberBandingFactor = isRubberBanding
           ? (state.velocityX * 25) / state.cachedScrollWidth
           : 0;
@@ -971,9 +1339,12 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         );
 
         if (
-          !isRubberBanding &&
-          finalScroll < state.cachedScrollWidth - state.cachedOffsetWidth &&
-          finalScroll > 0 &&
+          // when looping, the momentum always lands on a snap point: the
+          // content repeats, so there is no end of the list to run into
+          (loop ||
+            (!isRubberBanding &&
+              finalScroll < state.cachedScrollWidth - state.cachedOffsetWidth &&
+              finalScroll > 0)) &&
           Math.abs(state.velocityX) >= minVelocityForSnapping &&
           state.scrollSnapType
         ) {
@@ -988,7 +1359,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
 
         return decelerationFactor;
       },
-      [applyMomentumSnapping],
+      [applyMomentumSnapping, loop],
     );
 
     /**
@@ -1020,6 +1391,9 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         // order for the final scroll not to drift from the predicted value
         state.scrollLeft -= state.velocityX * FRAME_DURATION;
         container2.scrollLeft = state.scrollLeft;
+        // keeps state.scrollLeft in sync with the position we land on, so the
+        // momentum carries on across the jump
+        wrapLoopScroll();
         state.velocityX *= decelerationFactor;
 
         const newScrollLeft = state.scrollLeft;
@@ -1028,8 +1402,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         const remainingForwards = scrollWidth - offsetWidth - newScrollLeft;
         const remainingBackwards = newScrollLeft;
 
-        // Overscroll rubber band bounce-back
+        // Overscroll rubber band bounce-back (a looping carousel never reaches
+        // either end, there is nothing to bounce against)
         if (
+          !loop &&
           Math.abs(state.velocityX) > minVelocity &&
           (remainingForwards <= 1 || remainingBackwards < 1)
         ) {
@@ -1063,17 +1439,75 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           state.animationId = requestAnimationFrame(animate);
         } else {
           clearAnimation();
+          // the carousel came to a stop under our own steam: no scroll event is
+          // coming to tell us about it
+          settleLoopScroll();
         }
       };
 
       state.animationId = requestAnimationFrame(animate);
-    }, [clearAnimation, computeMomentumDecelerationFactor]);
+    }, [
+      clearAnimation,
+      computeMomentumDecelerationFactor,
+      loop,
+      settleLoopScroll,
+      wrapLoopScroll,
+    ]);
+
+    /**
+     * Set up observers and scrolling event listeners to update the scroll state.
+     */
+    useLayoutEffect(() => {
+      const container = viewportRef.current;
+      if (container) {
+        // We wait for the scroll to go quiet rather than listen for scrollend:
+        // browsers fire that at the end of every snap animation, which during a
+        // fast gesture means between two flicks of the wheel — teleporting there
+        // is exactly what we are trying to avoid.
+        let idleTimeout: MaybeUndefined<ReturnType<typeof setTimeout>>;
+        const handleScrollIdle = () => {
+          // the loop moves first: it teleports, which the snapping animation
+          // would otherwise have to be restarted for
+          settleLoopScroll();
+          settleWheelSnap();
+        };
+        const handleScroll = () => {
+          wrapLoopScroll();
+          updateScrollState();
+          clearTimeout(idleTimeout);
+          idleTimeout = setTimeout(handleScrollIdle, SCROLL_IDLE_DELAY);
+        };
+        const handleContentChange = () => {
+          // the loop period is only valid for the geometry it was measured on
+          loopMetricsRef.current = null;
+          handleScroll();
+        };
+        const resizeObserver = new ResizeObserver(handleContentChange);
+        const mutationObserver = new MutationObserver(handleContentChange);
+        resizeObserver.observe(container);
+        mutationObserver.observe(container, {
+          attributes: true,
+          childList: true,
+          subtree: true,
+        });
+        container.addEventListener("scroll", handleScroll);
+        handleContentChange();
+        return () => {
+          resizeObserver.disconnect();
+          mutationObserver.disconnect();
+          clearTimeout(idleTimeout);
+          container.removeEventListener("scroll", handleScroll);
+        };
+      }
+      return;
+    }, [settleLoopScroll, settleWheelSnap, updateScrollState, wrapLoopScroll]);
 
     /**
      * Trigger momentum animation when dragging stops, dispatch click if needed.
      */
     const handlePointerUp = useCallback(
       (event: React.PointerEvent<HTMLDivElement> | PointerEvent) => {
+        scrollStateRef.current.isPointerDown = false;
         if (event.pointerType !== "mouse") {
           return;
         }
@@ -1111,9 +1545,14 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     );
 
     useEffect(() => {
+      const handlePointerCancel = () => {
+        scrollStateRef.current.isPointerDown = false;
+      };
       document.addEventListener("pointerup", handlePointerUp);
+      document.addEventListener("pointercancel", handlePointerCancel);
       return () => {
         document.removeEventListener("pointerup", handlePointerUp);
+        document.removeEventListener("pointercancel", handlePointerCancel);
       };
     }, [handlePointerUp]);
 
@@ -1218,8 +1657,18 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         }}
         onWheel={(event) => {
           clearAnimation();
-          event.currentTarget.style.scrollSnapType =
-            scrollStateRef.current.scrollSnapType;
+          const state = scrollStateRef.current;
+          if (state.scrollSnapType && getIsChromium()) {
+            // Chromium spends a wheel scroll steering towards the snap point it
+            // picked when the gesture began, and will not be talked out of it —
+            // not by the carousel wrapping, not by anything. It is easier to
+            // take snapping off for the duration and apply it ourselves once the
+            // momentum has run out (see settleWheelSnap).
+            state.isWheelSnapSuspended = true;
+            event.currentTarget.style.scrollSnapType = "none";
+          } else {
+            event.currentTarget.style.scrollSnapType = state.scrollSnapType;
+          }
           onWheel?.(event);
         }}
         data-carousel-viewport=""
@@ -1280,6 +1729,15 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const { loop } = useCarouselContext();
     const [duplicates, setDuplicates] = useState(0);
+    const hasPositionedRef = useRef(false);
+    const loopMetricsRef = useRef<MaybeNull<LoopMetrics>>(null);
+    const childrenArray = useMemo(() => Children.toArray(children), [children]);
+    // text nodes are not part of `content.children`: only count elements, so
+    // that the indexes we measure the loop period from match the rendered DOM
+    const childrenCount = useMemo(
+      () => childrenArray.filter(isValidElement).length,
+      [childrenArray],
+    );
 
     /**
      * Measure element padding, used for scrollMargin
@@ -1308,49 +1766,12 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
     }, []);
 
     /**
-     * Figure out how many times children have to be duplicated to fill the viewport
+     * Duplicate the children until a single set covers LOOP_RUNWAY viewports,
+     * then park the scroll position on the first original child. Both steps live
+     * in the same effect: the duplicates land in the DOM through a re-render, so
+     * the scroll position can only be trusted once the state and the DOM agree.
      */
     useLayoutEffect(() => {
-      if (!loop) {
-        // cleanup previous duplicates if needed
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setDuplicates(0);
-        return;
-      }
-
-      const computeRequiredDuplicates = () => {
-        const content = containerRef.current;
-        // the viewport ref is not yet initialized when the effect first runs
-        const viewport = content?.closest<HTMLElement>(
-          "[data-carousel-viewport]",
-        );
-        if (!viewport || !content) {
-          return;
-        }
-        const hasClones = !!content.querySelector("[data-loop-clone]");
-        let measurableNode = content;
-        if (hasClones) {
-          const cleanedContent = content.cloneNode(true) as typeof content;
-          cleanedContent
-            .querySelectorAll("[data-loop-clone]")
-            .forEach((c) => c.remove());
-          measurableNode = cleanedContent;
-          content.replaceWith(measurableNode);
-        }
-        const viewportWidth = viewport.getBoundingClientRect().width;
-        const contentWidth = measurableNode.getBoundingClientRect().width;
-        const toFill = viewportWidth - contentWidth;
-        if (toFill > 0) {
-          const duplicates = Math.ceil(toFill / contentWidth);
-          setDuplicates(duplicates);
-        } else {
-          setDuplicates(0);
-        }
-        if (hasClones) {
-          measurableNode.replaceWith(content);
-        }
-      };
-
       const content = containerRef.current;
       // the viewport ref is not yet initialized when the effect first runs
       const viewport = content?.closest<HTMLElement>(
@@ -1359,50 +1780,91 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
       if (!viewport || !content) {
         return;
       }
-      const observer = new ResizeObserver(computeRequiredDuplicates);
+
+      if (!loop) {
+        hasPositionedRef.current = false;
+        loopMetricsRef.current = null;
+        if (duplicates !== 0) {
+          // cleanup previous duplicates if needed
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setDuplicates(0);
+        }
+        return;
+      }
+
+      const settle = () => {
+        const metrics = measureLoopMetrics(viewport);
+        const viewportWidth = viewport.clientWidth;
+        if (!metrics || !viewportWidth) {
+          return;
+        }
+        const required = Math.floor(
+          (LOOP_RUNWAY * viewportWidth) / metrics.naturalWidth,
+        );
+        if (required !== duplicates) {
+          // the DOM still holds the previous copies, wait for the re-render
+          // this triggers before touching the scroll position
+          setDuplicates(required);
+          return;
+        }
+        const previousMetrics = loopMetricsRef.current;
+        loopMetricsRef.current = metrics;
+        if (!hasPositionedRef.current) {
+          // The first original child opens the middle set, which starts exactly
+          // one set away from the beginning of the content. Doing this in a
+          // layout effect means the browser paints the carousel there, no
+          // scrolling is ever shown.
+          setLoopScrollLeft(viewport, metrics.setWidth, {
+            reselectSnapTarget: true,
+          });
+          hasPositionedRef.current = true;
+        } else if (
+          previousMetrics &&
+          (previousMetrics.naturalWidth !== metrics.naturalWidth ||
+            previousMetrics.setWidth !== metrics.setWidth)
+        ) {
+          // The content changed shape under us: the position we were on may no
+          // longer have content on both sides of it, so take it back home.
+          setLoopScrollLeft(
+            viewport,
+            viewport.scrollLeft - getLoopShift(viewport.scrollLeft, metrics),
+            { reselectSnapTarget: true },
+          );
+        }
+      };
+
+      settle();
+
+      const observer = new ResizeObserver(settle);
       observer.observe(viewport);
       observer.observe(content);
 
       return () => {
         observer.disconnect();
       };
-    }, []);
+    }, [childrenCount, duplicates, loop]);
 
-    const duplicatedChildren =
-      loop && duplicates
-        ? Array(duplicates + 1)
-            .fill(0)
-            .flatMap((_, setIndex) =>
-              Children.toArray(children).map((child, i) =>
-                setIndex !== 0 && isValidElement(child)
-                  ? cloneElement(
-                      child as ReactElement<Record<string, unknown>>,
-                      {
-                        key: `carousel-loop-fill-duplicate-${setIndex}-${child.key ?? i}`,
-                        // "aria-hidden": setIndex === 1 ? undefined : true,
-                        // tabIndex: setIndex === 1 ? undefined : -1,
-                        "data-loop-clone": true,
-                      },
-                    )
-                  : child,
-              ),
-            )
-        : children;
-
-    const renderedChildren = loop
-      ? [0, 1, 2].flatMap((setIndex) =>
-          Children.toArray(duplicatedChildren).map((child, i) =>
-            setIndex !== 1 && isValidElement(child)
-              ? cloneElement(child as ReactElement<Record<string, unknown>>, {
-                  key: `carousel-loop-${setIndex}-${child.key ?? i}`,
-                  "aria-hidden": setIndex === 1 ? undefined : true,
-                  tabIndex: setIndex === 1 ? undefined : -1,
-                  "data-loop-clone": setIndex === 1 ? undefined : true,
-                })
-              : child,
-          ),
-        )
-      : children;
+    const renderedChildren = useMemo(() => {
+      if (!loop) {
+        return children;
+      }
+      const copies = duplicates + 1;
+      return Array.from({ length: LOOP_SETS * copies }, (_, copyIndex) =>
+        childrenArray.map((child, index) =>
+          // the middle set opens on the original children, everything else is a
+          // clone: hidden from assistive tech and skipped when tabbing, but
+          // still visible and interactive with a pointer
+          copyIndex === copies || !isValidElement(child)
+            ? child
+            : cloneElement(child as ReactElement<Record<string, unknown>>, {
+                key: `carousel-loop-${copyIndex}-${child.key ?? index}`,
+                "aria-hidden": true,
+                tabIndex: -1,
+                "data-loop-clone": true,
+              }),
+        ),
+      ).flat();
+    }, [children, childrenArray, duplicates, loop]);
 
     return (
       <div
@@ -1410,6 +1872,7 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
         ref={combineRefs(containerRef, ref)}
         style={{ width: "fit-content", ...props.style }}
         data-carousel-content=""
+        data-carousel-loop-size={loop ? childrenCount : undefined}
       >
         {renderedChildren}
       </div>
@@ -1426,22 +1889,32 @@ type CarouselItemProps = ComponentPropsWithoutRef<"div"> & {
 const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
   ({ children, asChild, ...props }, ref) => {
     const elementRef = useRef<HTMLElement>(null);
+    const { loop } = useCarouselContext();
     const baseMarginInline = `var(${CSS_VARS.scrollMarginInline}, var(${CSS_VARS.fadeSize}, 0))`;
 
     useLayoutEffect(() => {
       const element = elementRef.current;
       if (element) {
         const paddingMargin = `calc(var(${CSS_VARS.viewportPaddingInlineStart}, 0px) + var(${CSS_VARS.contentPaddingInlineStart}, 0px))`;
-        if (element === element.parentElement?.firstElementChild) {
-          element.style.scrollMarginInline = `max(${baseMarginInline}, ${paddingMargin})`;
-        } else if (element === element.parentElement?.lastElementChild) {
-          element.style.scrollMarginInline = `max(${baseMarginInline}, ${paddingMargin})`;
-        }
+        const isEdgeItem =
+          element === element.parentElement?.firstElementChild ||
+          element === element.parentElement?.lastElementChild;
+        // When looping, every copy has to snap identically: giving the two items
+        // sitting at the edges of the content their own scroll margin would
+        // break the repetition the wrapping relies on — and there is no visible
+        // first or last item to keep clear of the padding anyway.
+        element.style.scrollMarginInline =
+          isEdgeItem && !loop
+            ? `max(${baseMarginInline}, ${paddingMargin})`
+            : baseMarginInline;
       }
-    }, [baseMarginInline]);
+    }, [baseMarginInline, loop]);
 
     const baseStyle: CSSProperties = {
-      willChange: "transform",
+      // Only worth hinting when there is a translate coming: a looping carousel
+      // never rubber-bands, and promoting every copy of every child would just
+      // give the browser more layers to repaint when the scroll wraps.
+      willChange: loop ? undefined : "transform",
       scrollMarginInline: baseMarginInline,
       ...props.style,
     };

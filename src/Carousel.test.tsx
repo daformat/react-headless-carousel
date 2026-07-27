@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Carousel } from "./Carousel.js";
+import type { MaybeUndefined } from "./utils/maybe.js";
 
 // --- Helpers ---
 
@@ -52,12 +53,15 @@ const getViewport = () =>
  * Renders a full carousel with five items and prev/next buttons.
  * boundaryOffset is fixed to {x:0, y:0} to avoid CSS-variable resolution in
  * jsdom, where getComputedStyle does not honour SCSS-defined custom properties.
+ * Looping is off by default: most of the suite is about what happens at the
+ * boundaries, which a looping carousel does not have.
  */
 const renderCarousel = (
   viewportProps: Partial<Parameters<typeof Carousel.Viewport>[0]> = {},
+  rootProps: Partial<Parameters<typeof Carousel.Root>[0]> = {},
 ) =>
   render(
-    <Carousel.Root boundaryOffset={{ x: 0, y: 0 }}>
+    <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop={false} {...rootProps}>
       <Carousel.Viewport {...viewportProps}>
         <Carousel.Content>
           {Array.from({ length: 5 }, (_, i) => (
@@ -357,7 +361,7 @@ describe("Carousel", () => {
   describe("click suppression during mouse drag", () => {
     const renderClickableCarousel = (onClick: () => void) =>
       render(
-        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }}>
+        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop={false}>
           <Carousel.Viewport>
             <Carousel.Content>
               <Carousel.Item>
@@ -603,6 +607,377 @@ describe("Carousel", () => {
           (item) => !(item.getAttribute("style") ?? "").includes("translate"),
         ),
       ).toBe(true);
+    });
+  });
+
+  describe("loop", () => {
+    const ITEM_WIDTH = 100;
+    const VIEWPORT_WIDTH = 300;
+    const CHILDREN_COUNT = 5;
+    /** width of a single copy of the children */
+    const NATURAL_WIDTH = ITEM_WIDTH * CHILDREN_COUNT;
+
+    const patchedKeys = [
+      "scrollLeft",
+      "scrollWidth",
+      "clientWidth",
+      "offsetWidth",
+      "getBoundingClientRect",
+      "scrollTo",
+    ] as const;
+    const originalDescriptors = new Map<
+      string,
+      MaybeUndefined<PropertyDescriptor>
+    >();
+
+    const isViewport = (el: HTMLElement) =>
+      el.hasAttribute("data-carousel-viewport");
+    const isItem = (el: HTMLElement) => el.hasAttribute("data-carousel-item");
+    const getViewportOf = (el: HTMLElement) =>
+      isViewport(el) ? el : el.closest<HTMLElement>("[data-carousel-viewport]");
+    const getContentWidth = (viewport: HTMLElement) => {
+      const content = viewport.querySelector("[data-carousel-content]");
+      return (content?.children.length ?? 0) * ITEM_WIDTH;
+    };
+
+    /**
+     * jsdom has no layout engine, and the loop needs one: it measures how far
+     * apart two copies of the children are to know its repetition period. This
+     * installs a minimal horizontal layout on the prototypes — a viewport
+     * VIEWPORT_WIDTH wide, holding items of ITEM_WIDTH laid out one after the
+     * other from the start of the content — and has to be in place *before*
+     * rendering, since the carousel measures itself in a layout effect.
+     */
+    const stubLayout = () => {
+      const scrollPositions = new WeakMap<HTMLElement, number>();
+      const patch = (key: string, descriptor: PropertyDescriptor) => {
+        originalDescriptors.set(
+          key,
+          Object.getOwnPropertyDescriptor(HTMLElement.prototype, key),
+        );
+        Object.defineProperty(HTMLElement.prototype, key, {
+          ...descriptor,
+          configurable: true,
+        });
+      };
+
+      patch("scrollLeft", {
+        get(this: HTMLElement) {
+          return scrollPositions.get(this) ?? 0;
+        },
+        set(this: HTMLElement, value: number) {
+          // browsers clamp the scroll position to the scrollable range
+          const maxScroll = Math.max(0, this.scrollWidth - this.clientWidth);
+          scrollPositions.set(this, Math.max(0, Math.min(value, maxScroll)));
+        },
+      });
+      patch("scrollWidth", {
+        get(this: HTMLElement) {
+          return isViewport(this) ? getContentWidth(this) : 0;
+        },
+      });
+      patch("clientWidth", {
+        get(this: HTMLElement) {
+          return isViewport(this) ? VIEWPORT_WIDTH : 0;
+        },
+      });
+      patch("offsetWidth", {
+        get(this: HTMLElement) {
+          return isViewport(this)
+            ? VIEWPORT_WIDTH
+            : isItem(this)
+              ? ITEM_WIDTH
+              : 0;
+        },
+      });
+      patch("getBoundingClientRect", {
+        value(this: HTMLElement) {
+          const viewport = getViewportOf(this);
+          const scrollLeft = viewport?.scrollLeft ?? 0;
+          let left = 0;
+          let width = 0;
+          if (viewport === this) {
+            width = VIEWPORT_WIDTH;
+          } else if (isItem(this) && this.parentElement) {
+            const index = Array.prototype.indexOf.call(
+              this.parentElement.children,
+              this,
+            );
+            left = index * ITEM_WIDTH - scrollLeft;
+            width = ITEM_WIDTH;
+          } else if (viewport) {
+            left = -scrollLeft;
+            width = getContentWidth(viewport);
+          }
+          return {
+            x: left,
+            y: 0,
+            left,
+            right: left + width,
+            top: 0,
+            bottom: 0,
+            width,
+            height: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        },
+      });
+      patch("scrollTo", {
+        value(this: HTMLElement, options?: ScrollToOptions | number) {
+          const left = typeof options === "number" ? options : options?.left;
+          if (left !== undefined) {
+            this.scrollLeft = left;
+          }
+        },
+      });
+    };
+
+    const restoreLayout = () => {
+      patchedKeys.forEach((key) => {
+        const descriptor = originalDescriptors.get(key);
+        if (descriptor) {
+          Object.defineProperty(HTMLElement.prototype, key, descriptor);
+        } else {
+          delete (HTMLElement.prototype as unknown as Record<string, unknown>)[
+            key
+          ];
+        }
+      });
+      originalDescriptors.clear();
+    };
+
+    const renderLoopCarousel = (
+      viewportProps: Partial<Parameters<typeof Carousel.Viewport>[0]> = {},
+    ) => renderCarousel(viewportProps, { loop: true });
+
+    const getContent = () =>
+      document.querySelector("[data-carousel-content]") as HTMLElement;
+    const getItems = () => Array.from(getContent().children) as HTMLElement[];
+    /** Items rendered from the children the user passed, clones excluded */
+    const getOriginalItems = () =>
+      getItems().filter((item) => !item.hasAttribute("data-loop-clone"));
+
+    beforeEach(stubLayout);
+    afterEach(restoreLayout);
+
+    it("repeats the children enough to fill the runway on both sides", () => {
+      renderLoopCarousel();
+      const items = getItems();
+      // one set before, one set after, and each set is wider than the viewport
+      expect(items.length % 3).toBe(0);
+      expect((items.length / 3) * ITEM_WIDTH).toBeGreaterThan(VIEWPORT_WIDTH);
+      // the children themselves are only ever rendered once
+      expect(getOriginalItems()).toHaveLength(CHILDREN_COUNT);
+    });
+
+    it("renders the copies as hidden from assistive tech and unreachable by tab", () => {
+      renderLoopCarousel();
+      const clones = getItems().filter((item) =>
+        item.hasAttribute("data-loop-clone"),
+      );
+      expect(clones.length).toBeGreaterThan(0);
+      expect(
+        clones.every(
+          (clone) =>
+            clone.getAttribute("aria-hidden") === "true" &&
+            clone.getAttribute("tabindex") === "-1",
+        ),
+      ).toBe(true);
+    });
+
+    it("starts on the first original child, without having to scroll there", () => {
+      renderLoopCarousel();
+      const items = getItems();
+      const firstOriginal = getOriginalItems()[0] as HTMLElement;
+      // the first original child sits flush against the start of the viewport
+      expect(getViewport().scrollLeft).toBe(
+        items.indexOf(firstOriginal) * ITEM_WIDTH,
+      );
+    });
+
+    it("does not touch the scroll position when looping is off", () => {
+      renderCarousel();
+      expect(getViewport().scrollLeft).toBe(0);
+      expect(getItems()).toHaveLength(CHILDREN_COUNT);
+    });
+
+    /** How long the component waits for the scroll to go quiet */
+    const SCROLL_IDLE_DELAY = 200;
+
+    it("comes back to the original children once the scroll settles", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel();
+      const vp = getViewport();
+      const home = vp.scrollLeft;
+      const items = getItems();
+      const drifted = home + 600;
+      vp.scrollLeft = drifted;
+      fireEvent.scroll(vp);
+      expect(vp.scrollLeft).toBe(drifted);
+
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+
+      // it moved by a whole number of copies, so nothing moved on screen
+      expect(vp.scrollLeft).not.toBe(drifted);
+      expect((drifted - vp.scrollLeft) % NATURAL_WIDTH).toBe(0);
+      // and it landed back on the original children, the ones assistive tech
+      // and tabbing can reach
+      const itemAtViewportStart = items[Math.round(vp.scrollLeft / ITEM_WIDTH)];
+      expect(itemAtViewportStart?.hasAttribute("data-loop-clone")).toBe(false);
+    });
+
+    it("does not touch the scroll position while it is still moving", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel();
+      const vp = getViewport();
+      const drifted = vp.scrollLeft + 600;
+      vp.scrollLeft = drifted;
+      fireEvent.scroll(vp);
+
+      // teleporting mid-gesture cancels whatever the browser is animating, so
+      // nothing may happen until the scroll has been quiet for a while
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY - 1);
+      expect(vp.scrollLeft).toBe(drifted);
+    });
+
+    it("stays put when the scroll barely drifted from the original children", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel();
+      const vp = getViewport();
+      const drifted = vp.scrollLeft + ITEM_WIDTH;
+      vp.scrollLeft = drifted;
+      fireEvent.scroll(vp);
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.scrollLeft).toBe(drifted);
+    });
+
+    it("wraps back towards the middle when scrolling close to the end", () => {
+      renderLoopCarousel();
+      const vp = getViewport();
+      const maxScroll = vp.scrollWidth - vp.clientWidth;
+      const beforeWrap = maxScroll - 10;
+      vp.scrollLeft = beforeWrap;
+      fireEvent.scroll(vp);
+
+      const afterWrap = vp.scrollLeft;
+      // it moved back far enough to have room to keep scrolling forwards
+      expect(afterWrap).toBeLessThan(maxScroll - VIEWPORT_WIDTH);
+      expect(afterWrap).toBeGreaterThan(VIEWPORT_WIDTH);
+      // and it landed on a whole number of copies, so nothing moved on screen
+      expect((beforeWrap - afterWrap) % NATURAL_WIDTH).toBe(0);
+    });
+
+    it("wraps forwards when scrolling close to the start", () => {
+      renderLoopCarousel();
+      const vp = getViewport();
+      const maxScroll = vp.scrollWidth - vp.clientWidth;
+      const beforeWrap = 10;
+      vp.scrollLeft = beforeWrap;
+      fireEvent.scroll(vp);
+
+      const afterWrap = vp.scrollLeft;
+      expect(afterWrap).toBeGreaterThan(VIEWPORT_WIDTH);
+      expect(afterWrap).toBeLessThan(maxScroll - VIEWPORT_WIDTH);
+      expect((afterWrap - beforeWrap) % NATURAL_WIDTH).toBe(0);
+    });
+
+    it("leaves the scroll position alone while it stays away from the ends", () => {
+      renderLoopCarousel();
+      const vp = getViewport();
+      const middle = (vp.scrollWidth - vp.clientWidth) / 2;
+      vp.scrollLeft = middle;
+      fireEvent.scroll(vp);
+      expect(vp.scrollLeft).toBe(middle);
+    });
+
+    /**
+     * Chromium steers a wheel scroll towards the snap point it chose when the
+     * gesture started and will not let go of it, so the carousel takes snapping
+     * off for the duration and applies it itself once the momentum has run out.
+     */
+    const asChromium = () => {
+      Object.defineProperty(navigator, "userAgentData", {
+        value: { brands: [{ brand: "Chromium", version: "140" }] },
+        configurable: true,
+      });
+    };
+
+    it("suspends snapping while a wheel scroll runs, in Chromium only", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+
+      asChromium();
+      fireEvent.wheel(vp, { deltaX: 120 });
+      expect(vp.style.scrollSnapType).toBe("none");
+
+      // ...and gives it back once the scroll has been quiet long enough for the
+      // momentum to be over
+      fireEvent.scroll(vp);
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+    });
+
+    it("leaves the snapping alone on a wheel scroll outside Chromium", () => {
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+      Object.defineProperty(navigator, "userAgentData", {
+        value: { brands: [{ brand: "WebKit", version: "620" }] },
+        configurable: true,
+      });
+
+      fireEvent.wheel(vp, { deltaX: 120 });
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+    });
+
+    it("leaves dragging to look after its own snapping", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+      asChromium();
+      fireEvent.wheel(vp, { deltaX: 120 });
+      expect(vp.style.scrollSnapType).toBe("none");
+
+      // taking hold of the carousel hands the scroll over to the drag, which
+      // turns snapping off while it runs and lands on a snap point by itself —
+      // the wheel has no business putting it back under it
+      fireEvent.pointerDown(vp, {
+        pointerType: "mouse",
+        pointerId: 1,
+        clientX: 0,
+      });
+      fireEvent.scroll(vp);
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.style.scrollSnapType).toBe("none");
+    });
+
+    it("keeps the snapping the user asked for through a wrap", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      fireEvent.scroll(vp);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+
+      vi.advanceTimersByTime(SCROLL_IDLE_DELAY);
+      expect(vp.style.scrollSnapType).toBe("x mandatory");
+    });
+
+    it("can always be scrolled both ways", async () => {
+      renderLoopCarousel();
+      const vp = getViewport();
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(vp.getAttribute("data-can-scroll")).toBe("both");
+      });
+      expect(
+        (screen.getByRole("button", { name: "prev" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "next" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
     });
   });
 
