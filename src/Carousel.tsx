@@ -1069,7 +1069,8 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         // only a scroll the tabbing asked for is remembered: it is the one a
         // wrap has to carry along, and the only one whose destination we own
         const state = scrollStateRef?.current;
-        if (state?.isFocusScrolling) {
+        const isForFocus = !!state?.isFocusScrolling;
+        if (isForFocus && state) {
           // eslint-disable-next-line react-hooks/immutability
           state.focusScrollDestination = snappedScroll;
         }
@@ -1083,13 +1084,21 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         });
         // request animation frame to prevent Safari from being Safari
         requestAnimationFrame(() => {
+          // A wrap can land inside the frame this waited out, moving every copy
+          // along by whole periods — and the destination with them. Reading it
+          // back rather than closing over it keeps this from scrolling to where
+          // the content used to be, which is a journey of whole copies across
+          // the whole carousel. Chromium fires this frame before the wrap gets
+          // a chance; Firefox does not, which is where it shows.
+          const left = snappedScroll;
           // LOOP_DEBUG
           traceLoop("scroll-fires", container, {
             scrollLeft: Math.round(container.scrollLeft),
-            goingTo: Math.round(snappedScroll),
+            goingTo: Math.round(left),
+            scheduledFor: Math.round(snappedScroll),
           });
           container.scrollTo({
-            left: snappedScroll,
+            left,
             behavior,
           });
         });

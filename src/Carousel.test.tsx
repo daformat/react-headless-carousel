@@ -1155,6 +1155,46 @@ describe("Carousel", () => {
       expect(behaviours).toContain("smooth");
     });
 
+    it("sends a waiting frame where the content went, not where it was", () => {
+      // the scroll waits a frame before it runs, and a wrap can land inside it
+      const frames: FrameRequestCallback[] = [];
+      vi.stubGlobal(
+        "requestAnimationFrame",
+        vi.fn((cb: FrameRequestCallback) => frames.push(cb)),
+      );
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      const originals = getOriginalItems();
+
+      vp.scrollLeft = offsetOf(items.indexOf(originals[0]));
+      tabTo(
+        items[items.indexOf(originals[0]) + 1].querySelector(
+          "button",
+        ) as HTMLButtonElement,
+      );
+      expect(frames.length).toBeGreaterThan(0);
+
+      // the wrap moves the content, and the scroll is sent on after it
+      const scrollTo = vi.spyOn(vp, "scrollTo");
+      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      fireEvent.scroll(vp);
+      const carried = scrollTo.mock.calls
+        .map(([options]) => options as ScrollToOptions)
+        .filter((options) => options?.behavior === "smooth")
+        .pop();
+      expect(carried).toBeDefined();
+
+      // only now does the frame from before the wrap get to run: it must go
+      // where the content is now, not to the place it was told about
+      scrollTo.mockClear();
+      frames[frames.length - 1]?.(0);
+      const late = scrollTo.mock.calls
+        .map(([options]) => options as ScrollToOptions)
+        .pop();
+      expect(late?.left).toBe(carried?.left);
+    });
+
     it("carries it across for the other engines too", () => {
       // a scroll cut short by the wrap lands somewhere that is no snap point in
       // any engine; each corrects for that in its own way, and none of them
