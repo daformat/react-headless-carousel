@@ -109,18 +109,24 @@ plainly see, but it does mean tabbing can land inside an `aria-hidden` copy.
 <Carousel.Root autoplay={{ mode: "continuous", speed: 90 }} />
 <Carousel.Root autoplay={{ mode: "page", interval: 5000 }} />
 <Carousel.Root autoplay={{ mode: "continuous", atEnd: "reverse", pauseAtEnd: 1500 }} />
+<Carousel.Root autoplay={{ mode: "item", pauseOnInteraction: 5000 }} />
 ```
 
-| Option         | Type                               | Default      | Description                                                                                                                                           |
-| -------------- | ---------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`         | `"item" \| "page" \| "continuous"` | `"item"`     | `item` steps to the next item, `page` makes the same move as the prev/next buttons, `continuous` scrolls at a steady speed without stopping on items. |
-| `direction`    | `"forwards" \| "backwards"`        | `"forwards"` | Which way to go.                                                                                                                                      |
-| `interval`     | `number`                           | `3000`       | Milliseconds between steps. `item` and `page` only.                                                                                                   |
-| `speed`        | `number`                           | `60`         | Pixels per second. `continuous` only.                                                                                                                 |
-| `atEnd`        | `"rewind" \| "reverse" \| "stop"`  | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. Not available with a literal `loop`.    |
-| `pauseAtEnd`   | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with a literal `loop`.                                    |
-| `pauseOnHover` | `boolean`                          | `true`       | Pause while the pointer is over the carousel.                                                                                                         |
-| `pauseOnFocus` | `boolean`                          | `true`       | Pause while the focus is anywhere inside the carousel, items included.                                                                                |
+Hovering and focusing describe a mouse and a keyboard. A touch has neither, so `pauseOnInteraction` is what stops the
+carousel taking an item away from someone reading it on a phone: scrolling or dragging holds it, and it picks up again
+once they have left it alone — a drag for as long as the finger is down, a scroll for as long as it keeps going.
+
+| Option               | Type                               | Default      | Description                                                                                                                                           |
+| -------------------- | ---------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`               | `"item" \| "page" \| "continuous"` | `"item"`     | `item` steps to the next item, `page` makes the same move as the prev/next buttons, `continuous` scrolls at a steady speed without stopping on items. |
+| `direction`          | `"forwards" \| "backwards"`        | `"forwards"` | Which way to go.                                                                                                                                      |
+| `interval`           | `number`                           | `3000`       | Milliseconds between steps. `item` and `page` only.                                                                                                   |
+| `speed`              | `number`                           | `60`         | Pixels per second. `continuous` only.                                                                                                                 |
+| `atEnd`              | `"rewind" \| "reverse" \| "stop"`  | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. Not available with a literal `loop`.    |
+| `pauseAtEnd`         | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with a literal `loop`.                                    |
+| `pauseOnHover`       | `boolean`                          | `true`       | Pause while the pointer is over the carousel.                                                                                                         |
+| `pauseOnFocus`       | `boolean`                          | `true`       | Pause while the focus is anywhere inside the carousel, items included.                                                                                |
+| `pauseOnInteraction` | `number \| false`                  | `1500`       | Milliseconds to wait after the user has scrolled or dragged before picking up again. `false` carries on regardless.                                   |
 
 The options that do not apply to a given configuration are compile errors rather than settings that quietly do nothing,
 and the type carries the reason: hovering `atEnd` on a looping carousel says it does not apply there, since a looping

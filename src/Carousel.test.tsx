@@ -1573,6 +1573,66 @@ describe("Carousel", () => {
       expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
     });
 
+    it("stops when the carousel is scrolled, and picks up again after", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+
+      // a phone has no hover to pause it, so the scroll has to
+      fireEvent.wheel(vp, { deltaX: 120 });
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+
+      vi.advanceTimersByTime(1499);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+      vi.advanceTimersByTime(1);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+    });
+
+    it("waits for the finger to come up before starting that clock", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+
+      fireEvent.pointerDown(vp, { pointerType: "touch", pointerId: 1 });
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+
+      // still held: a drag can take as long as it likes
+      vi.advanceTimersByTime(5000);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+
+      fireEvent.pointerUp(document, { pointerType: "touch", pointerId: 1 });
+      vi.advanceTimersByTime(1500);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+    });
+
+    it("waits as long as it is told to", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({
+        mode: "item",
+        interval: 1000,
+        pauseOnInteraction: 5000,
+      });
+
+      fireEvent.wheel(vp, { deltaX: 120 });
+      vi.advanceTimersByTime(1500);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+      vi.advanceTimersByTime(3500);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+    });
+
+    it("carries on through a scroll when told not to mind", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({
+        mode: "item",
+        interval: 1000,
+        pauseOnInteraction: false,
+      });
+
+      fireEvent.wheel(vp, { deltaX: 120 });
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+      vi.advanceTimersByTime(1000);
+      expect(vp.scrollTo).toHaveBeenCalled();
+    });
+
     it("steps on its own every interval", () => {
       vi.useFakeTimers();
       const { vp } = renderAutoplay({ mode: "item", interval: 1000 });

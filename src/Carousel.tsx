@@ -57,6 +57,11 @@ const SCROLL_IDLE_DELAY = 200;
  */
 const MIN_AUTOPLAY_STEP = 0.5;
 /**
+ * How long the autoplay waits after the user has scrolled or dragged before
+ * picking up again.
+ */
+const AUTOPLAY_RESUME_DELAY = 1500;
+/**
  * How long after a wheel event the browser still counts as running a scroll of
  * its own. Momentum keeps the events coming, so this only has to cover the gap
  * between two of them.
@@ -646,6 +651,16 @@ type CarouselAutoplayBase = {
   pauseOnHover?: boolean;
   /** Pause while the focus is anywhere inside the carousel. On by default */
   pauseOnFocus?: boolean;
+  /**
+   * How long to wait, in milliseconds, after the user has scrolled or dragged
+   * the carousel before picking up again. `false` carries on regardless.
+   * Defaults to 1500.
+   *
+   * Hovering and focusing describe a mouse and a keyboard. A touch has neither,
+   * so on a phone this is the only thing standing between someone reading an
+   * item and the carousel taking it away from them.
+   */
+  pauseOnInteraction?: number | false;
 };
 
 /**
@@ -1296,6 +1311,8 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
     const autoplayAtEnd = autoplayConfig.atEnd ?? "rewind";
     const autoplayPauseOnHover = autoplayConfig.pauseOnHover ?? true;
     const autoplayPauseOnFocus = autoplayConfig.pauseOnFocus ?? true;
+    const autoplayPauseOnInteraction =
+      autoplayConfig.pauseOnInteraction ?? AUTOPLAY_RESUME_DELAY;
 
     /**
      * Scrolls the carousel on its own, and gets out of the way the moment
@@ -1522,6 +1539,25 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       const resumeHover = () => setPaused("hover", false);
       const pauseFocus = () => setPaused("focus", true);
       const resumeFocus = () => setPaused("focus", false);
+      // The wait starts when the interaction ends, not when it begins: a drag
+      // holds the carousel for as long as the finger is down, and a wheel keeps
+      // pushing the wait back for as long as the scrolling goes on.
+      let resumeTimeout: MaybeUndefined<ReturnType<typeof setTimeout>>;
+      const holdForInteraction = () => {
+        clearTimeout(resumeTimeout);
+        setPaused("interaction", true);
+      };
+      const releaseAfterInteraction = () => {
+        clearTimeout(resumeTimeout);
+        resumeTimeout = setTimeout(
+          () => setPaused("interaction", false),
+          autoplayPauseOnInteraction || AUTOPLAY_RESUME_DELAY,
+        );
+      };
+      const handleInteraction = () => {
+        holdForInteraction();
+        releaseAfterInteraction();
+      };
       const handleVisibility = () =>
         setPaused("hidden", document.visibilityState === "hidden");
 
@@ -1535,20 +1571,35 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       // whatever buttons and controls sit alongside the viewport are usually
       // still focused long after they have been used — which would leave the
       // carousel paused for good.
-      const focusTarget = viewportRef.current ?? root;
+      const viewport = viewportRef.current ?? root;
       if (autoplayPauseOnFocus) {
-        focusTarget.addEventListener("focusin", pauseFocus);
-        focusTarget.addEventListener("focusout", resumeFocus);
+        viewport.addEventListener("focusin", pauseFocus);
+        viewport.addEventListener("focusout", resumeFocus);
+      }
+      // Only what the user did directly: the autoplay's own scrolling would
+      // otherwise keep pausing the autoplay.
+      if (autoplayPauseOnInteraction !== false) {
+        viewport.addEventListener("wheel", handleInteraction, {
+          passive: true,
+        });
+        viewport.addEventListener("pointerdown", holdForInteraction);
+        document.addEventListener("pointerup", releaseAfterInteraction);
+        document.addEventListener("pointercancel", releaseAfterInteraction);
       }
       document.addEventListener("visibilitychange", handleVisibility);
       reducedMotion?.addEventListener("change", start);
 
       return () => {
         stop();
+        clearTimeout(resumeTimeout);
         root.removeEventListener("mouseenter", pauseHover);
         root.removeEventListener("mouseleave", resumeHover);
-        focusTarget.removeEventListener("focusin", pauseFocus);
-        focusTarget.removeEventListener("focusout", resumeFocus);
+        viewport.removeEventListener("focusin", pauseFocus);
+        viewport.removeEventListener("focusout", resumeFocus);
+        viewport.removeEventListener("wheel", handleInteraction);
+        viewport.removeEventListener("pointerdown", holdForInteraction);
+        document.removeEventListener("pointerup", releaseAfterInteraction);
+        document.removeEventListener("pointercancel", releaseAfterInteraction);
         document.removeEventListener("visibilitychange", handleVisibility);
         reducedMotion?.removeEventListener("change", start);
       };
@@ -1561,6 +1612,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       autoplayPauseAtEnd,
       autoplayPauseOnFocus,
       autoplayPauseOnHover,
+      autoplayPauseOnInteraction,
       autoplaySpeed,
       handleScrollToNext,
       handleScrollToPrev,
