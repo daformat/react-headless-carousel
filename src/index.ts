@@ -10,6 +10,7 @@ export type {
   CarouselItemProps,
   CarouselNextPageProps,
   CarouselPrevPageProps,
+  CarouselReducedMotion,
   CarouselRootProps,
   CarouselViewportProps,
 } from "./Carousel.js";

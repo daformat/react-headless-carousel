@@ -19,7 +19,7 @@ import {
   useState,
 } from "react";
 
-import type { MaybeNull, MaybeUndefined } from "./utils/maybe.js";
+import type { Maybe, MaybeNull, MaybeUndefined } from "./utils/maybe.js";
 
 /**
  * Use a fixed frame duration so that we can accurately predict snapping and
@@ -132,6 +132,12 @@ type ScrollState = {
    * and still owes the user an animation to the position it asks for.
    */
   isWheelSnapSuspended: boolean;
+  /**
+   * Whether the carousel has been told to animate its scrolls regardless of
+   * `prefers-reduced-motion`. Kept here so the scrolling has it to hand: it is
+   * `Carousel.Root` that takes the prop, and the scrolls are made from all over.
+   */
+  ignoresReducedMotion: boolean;
   /**
    * Where the scroll was as of the last scroll event. Adding or removing the
    * looping copies changes how much content sits in front of the position, and
@@ -457,6 +463,36 @@ const getIsChromium = () => {
 };
 
 /**
+ * Whether the user has asked for less movement. Asked afresh every time rather
+ * than remembered, so a preference changed mid-session applies to the very next
+ * scroll without anything having to be listening for it.
+ */
+const prefersReducedMotion = () =>
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+/**
+ * What to ask the browser for, once the user's motion preference has had its
+ * say. Someone who has asked for less of it is not asking to be taken somewhere
+ * else: the destination is theirs either way, it is the journey they do
+ * without. A carousel sweeps a good part of the screen sideways to get there,
+ * which is exactly the kind of movement the preference is about.
+ *
+ * Only what the carousel animates itself goes through here. A drag is the
+ * user's own hand, and the momentum that carries on from it is the gesture they
+ * made finishing: taking that away would leave the carousel stopping dead under
+ * their finger, which is less control rather than less motion.
+ */
+const resolveScrollBehavior = (
+  behavior: ScrollToOptions["behavior"],
+  state: Maybe<ScrollState>,
+): ScrollToOptions["behavior"] =>
+  behavior !== "instant" &&
+  !state?.ignoresReducedMotion &&
+  prefersReducedMotion()
+    ? "instant"
+    : behavior;
+
+/**
  * Instantly jumps the scroll position, whatever `scroll-behavior` the page asked
  * for.
  *
@@ -747,8 +783,18 @@ type CarouselBoundaryOffset =
   | { x: number; y: number }
   | ((root: HTMLElement) => { x: number; y: number });
 
+/**
+ * What to do about `prefers-reduced-motion: reduce`. Respecting it is the
+ * default and covers the two things the carousel does of its own accord:
+ * autoplay does not run, and the scrolls it animates arrive instantly instead.
+ * `"ignore"` is for an app that has already made that decision elsewhere.
+ */
+type CarouselReducedMotion = "respect" | "ignore";
+
 type CarouselRootBaseProps = {
   boundaryOffset?: CarouselBoundaryOffset;
+  /** Defaults to `"respect"`. See {@link CarouselReducedMotion}. */
+  reducedMotion?: CarouselReducedMotion;
 } & ComponentPropsWithoutRef<"div">;
 
 /**
@@ -789,6 +835,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       boundaryOffset = defaultBoundaryOffset,
       loop = false,
       autoplay = false,
+      reducedMotion = "respect",
       children,
       ...props
     },
@@ -812,6 +859,13 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
     const [scrollStateRef, setScrollStateRef] =
       useState<MaybeUndefined<RefObject<ScrollState>>>(undefined);
     const rootRef = useRef<HTMLDivElement>(null);
+
+    // The prop is ours, the scrolling is spread across both components, so it
+    // goes where the scrolling already looks. Kept in step on every render, as
+    // the viewport does with its own props.
+    if (scrollStateRef?.current) {
+      scrollStateRef.current.ignoresReducedMotion = reducedMotion === "ignore";
+    }
 
     /**
      * Clears the current animation and resets animation styling
@@ -911,9 +965,12 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           0,
           Math.min(scrollPosition, maxScroll),
         );
-        container.scrollTo({ left: nextScrollPosition, behavior: "smooth" });
+        container.scrollTo({
+          left: nextScrollPosition,
+          behavior: resolveScrollBehavior("smooth", scrollStateRef?.current),
+        });
       },
-      [boundaryOffset],
+      [boundaryOffset, scrollStateRef],
     );
 
     /**
@@ -972,7 +1029,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           const left = carried ?? snappedScroll;
           container.scrollTo({
             left,
-            behavior,
+            behavior: resolveScrollBehavior(behavior, state),
           });
         });
       },
@@ -1002,7 +1059,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           const scrollPosition = getOffsetLeft(target, container) - offset;
           container.scrollTo({
             left: scrollPosition <= offset ? 0 : scrollPosition,
-            behavior: "smooth",
+            behavior: resolveScrollBehavior("smooth", scrollStateRef?.current),
           });
         } else if (isBefore || isAfter) {
           const currentScroll = container.scrollLeft;
@@ -1351,7 +1408,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       if (!autoplayEnabled || !root || !state) {
         return;
       }
-      const reducedMotion = window.matchMedia?.(
+      const reducedMotionQuery = window.matchMedia?.(
         "(prefers-reduced-motion: reduce)",
       );
 
@@ -1413,7 +1470,10 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         }
         rewindingTo =
           sign > 0 ? 0 : container.scrollWidth - container.clientWidth;
-        container.scrollTo({ left: rewindingTo, behavior: "smooth" });
+        container.scrollTo({
+          left: rewindingTo,
+          behavior: resolveScrollBehavior("smooth", state),
+        });
       };
 
       /**
@@ -1546,7 +1606,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
 
       const start = () => {
         stop();
-        if (reducedMotion?.matches) {
+        if (reducedMotionQuery?.matches && reducedMotion === "respect") {
           // things moving about on their own is the first thing someone asking
           // for reduced motion does not want
           return;
@@ -1641,7 +1701,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         document.addEventListener("pointercancel", releaseAfterInteraction);
       }
       document.addEventListener("visibilitychange", handleVisibility);
-      reducedMotion?.addEventListener("change", start);
+      reducedMotionQuery?.addEventListener("change", start);
 
       return () => {
         stop();
@@ -1656,7 +1716,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         document.removeEventListener("pointerup", releaseAfterInteraction);
         document.removeEventListener("pointercancel", releaseAfterInteraction);
         document.removeEventListener("visibilitychange", handleVisibility);
-        reducedMotion?.removeEventListener("change", start);
+        reducedMotionQuery?.removeEventListener("change", start);
       };
     }, [
       autoplayAtEnd,
@@ -1672,6 +1732,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       handleScrollToNext,
       handleScrollToPrev,
       loop,
+      reducedMotion,
       scrollStateRef,
       scrollToAdjacentItem,
       viewportRef,
@@ -1815,6 +1876,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       isFocusScrolling: false,
       isPointerDown: false,
       isWheelSnapSuspended: false,
+      ignoresReducedMotion: false,
       lastScrollLeft: 0,
       lastWheelTime: 0,
     });
@@ -2080,7 +2142,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       if (Math.abs(snapped - scrollLeft) > 1) {
         // still snapping off, so nothing pulls at the animation. It scrolls,
         // which brings us back here once it in turn goes quiet.
-        container.scrollTo({ left: snapped, behavior: "smooth" });
+        container.scrollTo({
+          left: snapped,
+          behavior: resolveScrollBehavior("smooth", state),
+        });
         return;
       }
       state.isWheelSnapSuspended = false;
@@ -2487,7 +2552,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
             scrollStateRef.current.focusScrollDestination = heading + wrapped;
             container.scrollTo({
               left: heading + wrapped,
-              behavior: "smooth",
+              behavior: resolveScrollBehavior("smooth", scrollStateRef.current),
             });
           }
           scrollStateRef.current.lastScrollLeft = container.scrollLeft;
@@ -3314,6 +3379,7 @@ export type {
   CarouselItemProps,
   CarouselNextPageProps,
   CarouselPrevPageProps,
+  CarouselReducedMotion,
   CarouselRootProps,
   CarouselViewportProps,
 };
@@ -3370,6 +3436,8 @@ export declare namespace Carousel {
   export type AutoplayAtEnd = CarouselAutoplayAtEnd;
 
   export type BoundaryOffset = CarouselBoundaryOffset;
+  /** What to do about `prefers-reduced-motion: reduce` */
+  export type ReducedMotion = CarouselReducedMotion;
   /** What `Carousel.useCarouselContext()` hands back */
   export type Context = CarouselContext;
 }

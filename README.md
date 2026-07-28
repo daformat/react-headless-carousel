@@ -69,6 +69,7 @@ The outermost wrapper. Provides context to all child carousel components. Render
 | `loop`           | `boolean`                                                                       | `false`                 | Renders copies of the children on either side and wraps the scroll position, so the carousel never reaches an end. See [Looping](#looping).                                                                                                                                                                                                              |
 | `autoplay`       | `boolean \| AutoplayOptions`                                                    | `false`                 | Scrolls the carousel on its own. `true` steps to the next item every three seconds; pass an object to choose how and how fast. See [Autoplay](#autoplay).                                                                                                                                                                                                |
 | `boundaryOffset` | `{ x: number; y: number } \| ((root: HTMLElement) => { x: number; y: number })` | `defaultBoundaryOffset` | Inset in pixels from the leading and trailing edges of the viewport used when scrolling items into view with prev/next buttons. The default implementation reads the content fade size from the viewport so items are never scrolled behind the fade. Pass a plain object or a function receiving the root element and returning `{ x, y }` to override. |
+| `reducedMotion`  | `"respect" \| "ignore"`                                                         | `"respect"`             | What to do about `prefers-reduced-motion: reduce`. See [Reduced motion](#reduced-motion).                                                                                                                                                                                                                                                                |
 | `ref`            | `Ref<HTMLDivElement>`                                                           | n/a                     | Forwarded ref to the root `<div>`.                                                                                                                                                                                                                                                                                                                       |
 | `...props`       | `ComponentPropsWithoutRef<"div">`                                               | n/a                     | All standard `<div>` props (`className`, `style`, `children`, etc.).                                                                                                                                                                                                                                                                                     |
 
@@ -152,7 +153,26 @@ carousel never runs out of content. Mixing up `speed` and `interval` puts that e
 
 Beyond `pauseOnHover` and `pauseOnFocus`, autoplay also gets out of the way on its own while you are dragging, while a
 wheel gesture's momentum is still running, and while the tab is hidden. It does not run at all when the user asks for
-`prefers-reduced-motion: reduce`, and it picks that change up live.
+`prefers-reduced-motion: reduce`, and it picks that change up live. See [Reduced motion](#reduced-motion).
+
+#### Reduced motion
+
+A carousel sweeps a good part of the screen sideways, which is the kind of movement `prefers-reduced-motion: reduce`
+exists for, so the carousel respects it by default in the two places it moves of its own accord:
+
+- **Autoplay does not run.** Not merely paused: a paused autoplay is still something that will start moving when the
+  pointer leaves. The preference is read live, so turning it on mid-session stops the carousel where it stands.
+- **The scrolls it animates arrive instantly.** Prev and next, tabbing to an item that is off screen, the rewind at the
+  end of an autoplay, and the snapping the carousel finishes for the browser when a loop wrap disturbs it. The
+  destination is what was asked for; the journey is the decoration, and `behavior: "smooth"` has no duration to shorten,
+  so instant is the only thing "less" can mean here.
+
+Dragging is untouched, and so is the momentum that carries on from it. That motion is the user's own hand, and stopping
+the carousel dead under a finger would be less control rather than less motion. The same goes for the rubber-banding at
+the ends, and for the loop, whose copies are structure rather than movement and whose teleports are invisible by
+construction.
+
+Pass `reducedMotion="ignore"` to opt out of all of it, for an app that has already made this decision somewhere else.
 
 #### Data attributes set on the root
 
@@ -344,6 +364,7 @@ const [mode, setMode] = useState<Carousel.AutoplayMode>("item");
 | `CarouselAutoplayDirection`       | `Carousel.AutoplayDirection`       | `"forwards" \| "backwards"`.                                                                                         |
 | `CarouselAutoplayAtEnd`           | `Carousel.AutoplayAtEnd`           | `"rewind" \| "reverse" \| "stop"`.                                                                                   |
 | `CarouselBoundaryOffset`          | `Carousel.BoundaryOffset`          | The `boundaryOffset` prop: a point, or a function returning one.                                                     |
+| `CarouselReducedMotion`           | `Carousel.ReducedMotion`           | The `reducedMotion` prop: `"respect" \| "ignore"`.                                                                   |
 | `CarouselContext`                 | `Carousel.Context`                 | The value returned by `Carousel.useCarouselContext`.                                                                 |
 
 Both `RootProps` and `AutoplayOptions` take a boolean type parameter about looping, and the two default in opposite

@@ -1564,6 +1564,98 @@ describe("Carousel", () => {
     });
   });
 
+  describe("prefers-reduced-motion", () => {
+    // there has to be somewhere to scroll to for any of this to show
+    beforeEach(stubLayout);
+    afterEach(() => {
+      restoreLayout();
+      // vitest keeps stubbed globals between tests, and a lingering motion
+      // preference would quietly settle every scroll in the suite
+      vi.unstubAllGlobals();
+    });
+
+    /** What the browser answers when asked about the preference */
+    const asMotionPreference = (reduce: boolean) => {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn(() => ({
+          matches: reduce,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        })),
+      );
+    };
+
+    /**
+     * Clicks the next button and says how the scroll it made was asked for. The
+     * scroll waits a frame, so the frames run here; and it comes after the
+     * probing the carousel does to find the snap points, which is why it is the
+     * last call rather than the only one.
+     */
+    const behaviourOfPagination = () => {
+      vi.stubGlobal(
+        "requestAnimationFrame",
+        vi.fn((cb: FrameRequestCallback) => {
+          cb(0);
+          return 1;
+        }),
+      );
+      const vp = getViewport();
+      const scrollTo = vi.spyOn(vp, "scrollTo");
+      fireEvent.click(screen.getByRole("button", { name: "next" }));
+      const last = scrollTo.mock.calls.at(-1)?.[0] as
+        | MaybeUndefined<ScrollToOptions>
+        | number;
+      return typeof last === "object" ? last?.behavior : undefined;
+    };
+
+    it("takes a pagination straight there instead of animating it", () => {
+      asMotionPreference(true);
+      renderCarousel();
+
+      expect(behaviourOfPagination()).toBe("instant");
+    });
+
+    it("animates it as usual when nothing has been asked for", () => {
+      asMotionPreference(false);
+      renderCarousel();
+
+      expect(behaviourOfPagination()).toBe("smooth");
+    });
+
+    it("animates anyway when told to pay the preference no mind", () => {
+      asMotionPreference(true);
+      renderCarousel({}, { reducedMotion: "ignore" });
+
+      expect(behaviourOfPagination()).toBe("smooth");
+    });
+
+    it("leaves autoplay standing", () => {
+      asMotionPreference(true);
+      renderCarousel({}, { autoplay: { mode: "item", interval: 1000 } });
+
+      expect(document.querySelector("[data-carousel-autoplay]")).toBeNull();
+    });
+
+    it("plays anyway when told to pay the preference no mind", () => {
+      vi.useFakeTimers();
+      asMotionPreference(true);
+      renderCarousel(
+        {},
+        {
+          autoplay: { mode: "item", interval: 1000 },
+          reducedMotion: "ignore",
+        },
+      );
+      const vp = getViewport();
+      const scrollTo = vi.spyOn(vp, "scrollTo");
+
+      vi.advanceTimersByTime(1000);
+
+      expect(scrollTo).toHaveBeenCalled();
+    });
+  });
+
   describe("autoplay", () => {
     // the carousel has to be able to see where its items are to step between
     // them, and be laid out before it is rendered
