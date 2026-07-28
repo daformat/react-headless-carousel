@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.1.2
+
+### Patch Changes
+
+- f9899fc: (chore): Refactor and update tests to fix act warnings
+
 ## 1.1.1
 
 ### Patch Changes
