@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.1.3
+
+### Patch Changes
+
+- 5cb1549: Update package.json and typecheck script
+
 ## 1.1.2
 
 ### Patch Changes
