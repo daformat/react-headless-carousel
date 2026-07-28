@@ -50,6 +50,20 @@ const getViewport = () =>
   document.querySelector("[data-carousel-viewport]") as HTMLElement;
 
 /**
+ * Indexing into the lists a test has just gone and fetched. Every one of them
+ * comes back as `T | undefined` under `noUncheckedIndexedAccess`, and a test
+ * reaching past the end of one wants to say so where it happened rather than
+ * carry an `undefined` into the assertion and fail somewhere else.
+ */
+const at = <T,>(items: T[], index: number): T => {
+  const item = items[index];
+  if (item === undefined) {
+    throw new Error(`nothing at index ${index} of ${items.length}`);
+  }
+  return item;
+};
+
+/**
  * Renders a full carousel with five items and prev/next buttons.
  * boundaryOffset is fixed to {x:0, y:0} to avoid CSS-variable resolution in
  * jsdom, where getComputedStyle does not honour SCSS-defined custom properties.
@@ -444,6 +458,27 @@ describe("Carousel", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "prev" }));
       expect(vp.scrollTo).toHaveBeenCalled();
+    });
+  });
+
+  describe("scroll numbers on the root", () => {
+    // the carousel has to be able to measure itself for there to be any
+    beforeEach(stubLayout);
+    afterEach(restoreLayout);
+
+    it("are there in the commit that mounts the carousel, before any scroll", () => {
+      renderCarousel();
+      const root = getViewport().parentElement as HTMLElement;
+      // five items of 100 in a viewport of 300, sitting at the start of them
+      expect(
+        root.style.getPropertyValue(Carousel.CSS_VARS.remainingForwards),
+      ).toBe("200px");
+      expect(
+        root.style.getPropertyValue(Carousel.CSS_VARS.remainingBackwards),
+      ).toBe("0px");
+      expect(
+        root.style.getPropertyValue(Carousel.CSS_VARS.scrollMarginInline),
+      ).toBe("0px");
     });
   });
 
@@ -1131,9 +1166,9 @@ describe("Carousel", () => {
 
       // a tab sets a scroll going, and the frame it waits on never runs here,
       // so it is still outstanding when the wrap arrives
-      vp.scrollLeft = offsetOf(items.indexOf(originals[0]));
+      vp.scrollLeft = offsetOf(items.indexOf(at(originals, 0)));
       tabTo(
-        items[items.indexOf(originals[0]) + 1].querySelector(
+        at(items, items.indexOf(at(originals, 0)) + 1).querySelector(
           "button",
         ) as HTMLButtonElement,
       );
@@ -1167,9 +1202,9 @@ describe("Carousel", () => {
       const items = getItems();
       const originals = getOriginalItems();
 
-      vp.scrollLeft = offsetOf(items.indexOf(originals[0]));
+      vp.scrollLeft = offsetOf(items.indexOf(at(originals, 0)));
       tabTo(
-        items[items.indexOf(originals[0]) + 1].querySelector(
+        at(items, items.indexOf(at(originals, 0)) + 1).querySelector(
           "button",
         ) as HTMLButtonElement,
       );
@@ -1205,9 +1240,9 @@ describe("Carousel", () => {
       const items = getItems();
       const originals = getOriginalItems();
 
-      vp.scrollLeft = offsetOf(items.indexOf(originals[0]));
+      vp.scrollLeft = offsetOf(items.indexOf(at(originals, 0)));
       tabTo(
-        items[items.indexOf(originals[0]) + 1].querySelector(
+        at(items, items.indexOf(at(originals, 0)) + 1).querySelector(
           "button",
         ) as HTMLButtonElement,
       );
@@ -1247,7 +1282,7 @@ describe("Carousel", () => {
       const items = getItems();
       // tabbing in lands on the first thing in the tab order, which after any
       // amount of scrolling is back at the beginning of the content
-      const first = items[0].querySelector("button") as HTMLButtonElement;
+      const first = at(items, 0).querySelector("button") as HTMLButtonElement;
       const parked = NATURAL_WIDTH - ITEM_WIDTH;
       vp.scrollLeft = parked;
 
@@ -1257,7 +1292,7 @@ describe("Carousel", () => {
       expect(vp.scrollLeft).toBe(parked);
       expect(document.activeElement).not.toBe(first);
       expect(document.activeElement).toBe(
-        items[parked / ITEM_WIDTH].querySelector("button"),
+        at(items, parked / ITEM_WIDTH).querySelector("button"),
       );
     });
 
@@ -1272,7 +1307,7 @@ describe("Carousel", () => {
         key: "Tab",
         shiftKey: true,
       });
-      (items[0].querySelector("button") as HTMLButtonElement).focus();
+      (at(items, 0).querySelector("button") as HTMLButtonElement).focus();
 
       // the last thing on screen, since that is the end the focus came in from
       const item = (document.activeElement as HTMLElement).closest(
@@ -1293,7 +1328,7 @@ describe("Carousel", () => {
       // Firefox makes a scrollable box focusable so it can be scrolled with the
       // arrow keys, so tabbing in stops on the carousel before its contents:
       // the tab after that is the real arrival, and it comes from the viewport
-      const first = items[0].querySelector("button") as HTMLButtonElement;
+      const first = at(items, 0).querySelector("button") as HTMLButtonElement;
       const parked = NATURAL_WIDTH - ITEM_WIDTH;
       vp.scrollLeft = parked;
 
@@ -1304,7 +1339,9 @@ describe("Carousel", () => {
       // copy of the arrival that happens to be within reach, so this says
       // which of the two paths ran
       expect(vp.scrollLeft).toBe(parked);
-      const firstOnScreen = items[parked / ITEM_WIDTH].querySelector("button");
+      const firstOnScreen = at(items, parked / ITEM_WIDTH).querySelector(
+        "button",
+      );
       expect(document.activeElement).toBe(firstOnScreen);
     });
 
@@ -1315,9 +1352,9 @@ describe("Carousel", () => {
       // already inside, so the redirect for arrivals does not apply: this is
       // the fallback for when the scroll cannot shift a period to reach what
       // the tab order offers next
-      const inside = items[6].querySelector("button") as HTMLButtonElement;
+      const inside = at(items, 6).querySelector("button") as HTMLButtonElement;
       inside.focus();
-      const first = items[0].querySelector("button") as HTMLButtonElement;
+      const first = at(items, 0).querySelector("button") as HTMLButtonElement;
       const parked = NATURAL_WIDTH - ITEM_WIDTH;
       vp.scrollLeft = parked;
 
@@ -1339,8 +1376,8 @@ describe("Carousel", () => {
       const vp = getViewport();
       const items = getItems();
       const originals = getOriginalItems();
-      const lastOriginal = originals[originals.length - 1];
-      const next = items[items.indexOf(lastOriginal) + 1];
+      const lastOriginal = at(originals, originals.length - 1);
+      const next = at(items, items.indexOf(lastOriginal) + 1);
       expect(next.hasAttribute("data-loop-clone")).toBe(true);
 
       // the focus is on the last of the children while the carousel has since
@@ -1371,8 +1408,8 @@ describe("Carousel", () => {
       const vp = getViewport();
       const items = getItems();
       const originals = getOriginalItems();
-      const from = originals[0];
-      const next = items[items.indexOf(from) + 1];
+      const from = at(originals, 0);
+      const next = at(items, items.indexOf(from) + 1);
 
       (from.querySelector("button") as HTMLButtonElement).focus();
       const parked = offsetOf(items.indexOf(from));
@@ -1429,7 +1466,7 @@ describe("Carousel", () => {
       const vp = getViewport();
       // the focus sits on one of the children rather than a copy: a teleport
       // carries it off screen just the same, and the focus ring with it
-      const original = getOriginalItems()[0];
+      const original = at(getOriginalItems(), 0);
       const button = original.querySelector("button") as HTMLButtonElement;
       button.focus();
 

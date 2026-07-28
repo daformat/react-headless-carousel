@@ -1315,6 +1315,32 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       autoplayConfig.pauseOnInteraction ?? AUTOPLAY_RESUME_DELAY;
 
     /**
+     * Puts the numbers the viewport has just measured onto the root.
+     *
+     * The viewport does this itself every time it scrolls, but it cannot on the
+     * pass that mounts it: React commits children before their parents, so at
+     * that point the root element it would write to does not exist yet. This is
+     * that write, once the whole tree is in place, and being a layout effect it
+     * still lands before anything is painted.
+     */
+    useLayoutEffect(() => {
+      const root = rootRef.current;
+      if (!root) {
+        return;
+      }
+      const { x: offsetX } = getBoundaryOffset(boundaryOffset, root);
+      root.style.setProperty(CSS_VARS.scrollMarginInline, `${offsetX}px`);
+      root.style.setProperty(
+        CSS_VARS.remainingForwards,
+        `${remainingForwards.current}px`,
+      );
+      root.style.setProperty(
+        CSS_VARS.remainingBackwards,
+        `${remainingBackwards.current}px`,
+      );
+    });
+
+    /**
      * Scrolls the carousel on its own, and gets out of the way the moment
      * anything else wants the scroll: the pointer resting on it, the focus
      * moving into it, a drag, a wheel, or a momentum still running.
@@ -2483,10 +2509,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           subtree: true,
         });
         container.addEventListener("scroll", handleScroll);
+        // The custom properties this measures for cannot be written yet: the
+        // root is committed after us and has no element to take them. It sets
+        // them itself in a layout effect of its own, once everything is there.
         handleContentChange();
-        // ...and once more when the commit is over and the root is there to
-        // take them, which a microtask still does before the browser paints
-        queueMicrotask(updateScrollState);
         return () => {
           resizeObserver.disconnect();
           mutationObserver.disconnect();
