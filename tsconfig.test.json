@@ -1,0 +1,18 @@
+{
+  // The build config compiles what ships, so it leaves out the tests, the
+  // playground and the tooling configs. This one takes the same rules to all of
+  // them: nothing is emitted, it only checks. `rootDir` widens to the repo
+  // because the files outside `src` are part of that now.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*",
+    ".playground/**/*",
+    "vitest.config.ts",
+    "eslint.config.mjs"
+  ],
+  "exclude": ["node_modules", "dist"]
+}
