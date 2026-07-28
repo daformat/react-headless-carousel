@@ -1564,6 +1564,93 @@ describe("Carousel", () => {
     });
   });
 
+  describe("how far the prev / next buttons go", () => {
+    // measured for real: the three modes only tell each other apart when the
+    // carousel can see where its items fall
+    beforeEach(stubLayout);
+    afterEach(() => {
+      restoreLayout();
+      vi.unstubAllGlobals();
+    });
+
+    /**
+     * Eight items of ITEM_WIDTH in a VIEWPORT_WIDTH viewport, parked half an
+     * item in. From a resting position the three modes mostly agree; half an
+     * item in they each have a different answer, which is the point of them.
+     */
+    const renderModes = (
+      mode?: Carousel.ScrollMode,
+      parked = ITEM_WIDTH / 2,
+    ) => {
+      render(
+        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop={false}>
+          <Carousel.Viewport>
+            <Carousel.Content>
+              {Array.from({ length: 8 }, (_, i) => (
+                <Carousel.Item key={i}>Item {i}</Carousel.Item>
+              ))}
+            </Carousel.Content>
+          </Carousel.Viewport>
+          <Carousel.PrevPage mode={mode}>prev</Carousel.PrevPage>
+          <Carousel.NextPage mode={mode}>next</Carousel.NextPage>
+        </Carousel.Root>,
+      );
+      // the scroll waits a frame, and frames are stubbed out to no-ops by default
+      vi.stubGlobal(
+        "requestAnimationFrame",
+        vi.fn((cb: FrameRequestCallback) => {
+          cb(0);
+          return 1;
+        }),
+      );
+      const vp = getViewport();
+      vp.scrollLeft = parked;
+      fireEvent.scroll(vp);
+      return vp;
+    };
+
+    const click = (name: "prev" | "next") =>
+      fireEvent.click(screen.getByRole("button", { name }));
+
+    it("brings the item the viewport was cutting off into view, by default", () => {
+      const vp = renderModes();
+
+      click("next");
+
+      // the fourth item starts where the viewport ended: now it starts where
+      // the viewport starts
+      expect(vp.scrollLeft).toBe(ITEM_WIDTH * 3);
+    });
+
+    it("steps one item along when asked for items", () => {
+      const vp = renderModes("item");
+
+      click("next");
+
+      expect(vp.scrollLeft).toBe(ITEM_WIDTH * 2);
+    });
+
+    it("moves by exactly what the viewport shows when asked for that", () => {
+      const parked = ITEM_WIDTH / 2;
+      const vp = renderModes("viewport", parked);
+
+      click("next");
+
+      // no regard for where the items fall: half an item is left showing at
+      // either end, which is what asking for a viewport means
+      expect(vp.scrollLeft).toBe(parked + VIEWPORT_WIDTH);
+    });
+
+    it("goes the same distances backwards", () => {
+      const parked = ITEM_WIDTH * 3 + ITEM_WIDTH / 2;
+      const vp = renderModes("viewport", parked);
+
+      click("prev");
+
+      expect(vp.scrollLeft).toBe(parked - VIEWPORT_WIDTH);
+    });
+  });
+
   describe("prefers-reduced-motion", () => {
     // there has to be somewhere to scroll to for any of this to show
     beforeEach(stubLayout);
@@ -1807,6 +1894,19 @@ describe("Carousel", () => {
       expect(vp.scrollTo).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1000);
       expect(vp.scrollTo).toHaveBeenCalled();
+    });
+
+    it("takes the move the buttons take, in whichever mode it is given", () => {
+      vi.useFakeTimers();
+      // the same three modes the buttons take: this one moves by the viewport
+      // rather than by an item, and there is only so much room left to do it in
+      const { vp } = renderAutoplay({ mode: "viewport", interval: 1000 });
+
+      vi.advanceTimersByTime(1000);
+
+      expect(vp.scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({ left: ITEM_WIDTH * 5 - VIEWPORT_WIDTH }),
+      );
     });
 
     it("passes over an item it is practically already on", () => {

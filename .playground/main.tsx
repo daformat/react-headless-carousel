@@ -12,6 +12,7 @@ const Demo = ({
   autoplay,
   align = "start",
   focusable = false,
+  modes = false,
 }: {
   label: string;
   count: number;
@@ -21,6 +22,7 @@ const Demo = ({
   autoplay?: boolean | Record<string, unknown>;
   align?: "start" | "center" | "end";
   focusable?: boolean;
+  modes?: boolean;
 }) => {
   const [info, setInfo] = useState("");
   useEffect(() => {
@@ -78,6 +80,19 @@ const Demo = ({
         </Carousel.Viewport>
         <Carousel.PrevPage>prev</Carousel.PrevPage>
         <Carousel.NextPage>next</Carousel.NextPage>
+        {modes ? (
+          <>
+            <Carousel.PrevPage id={`prev-item-${label}`} mode="item">
+              prev item
+            </Carousel.PrevPage>
+            <Carousel.NextPage id={`next-item-${label}`} mode="item">
+              next item
+            </Carousel.NextPage>
+            <Carousel.NextPage id={`next-viewport-${label}`} mode="viewport">
+              next viewport
+            </Carousel.NextPage>
+          </>
+        ) : null}
       </Carousel.Root>
       <pre id={`info-${label}`}>{info}</pre>
     </div>
@@ -101,6 +116,7 @@ createRoot(document.getElementById("root")!).render(
     <Toggle />
     <Demo label="focus-snap" count={6} loop focusable snap="x mandatory" />
     <Demo label="focus-nosnap" count={6} loop focusable />
+    <Demo label="modes" count={8} loop={false} modes />
     <Demo label="loop-snap" count={6} loop snap="x mandatory" />
     <Demo label="loop-nosnap" count={6} loop />
     <Demo label="loop-few" count={2} loop snap="x mandatory" />

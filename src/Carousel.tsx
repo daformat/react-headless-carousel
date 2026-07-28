@@ -168,8 +168,8 @@ type CarouselContext = {
   scrollsForwards: boolean;
   setScrollsBackwards: (scrollsBackwards: boolean) => void;
   setScrollsForwards: (scrollsForwards: boolean) => void;
-  handleScrollToNext: () => void;
-  handleScrollToPrev: () => void;
+  handleScrollToNext: (mode?: CarouselScrollMode) => void;
+  handleScrollToPrev: (mode?: CarouselScrollMode) => void;
   scrollIntoView: ScrollIntoView;
   remainingForwards: React.RefObject<number>;
   remainingBackwards: React.RefObject<number>;
@@ -675,7 +675,19 @@ const recenterLoopScroll = (container: HTMLElement) => {
 };
 
 /** What one turn of the autoplay does */
-type CarouselAutoplayStepMode = "item" | "page";
+/**
+ * How far one move goes, whether a button was clicked or the autoplay ticked.
+ *
+ * - `page` brings the next item that is not fully in view fully into view. It
+ *   is the one that keeps a partly-seen item from staying partly seen, which is
+ *   why it is what the prev / next buttons do unless told otherwise.
+ * - `item` steps to the next item along, whether or not the current one is
+ *   fully in view. Items smaller than the viewport move one at a time.
+ * - `viewport` moves by exactly what the viewport can show, ignoring where the
+ *   items fall. Whatever `scroll-snap-type` asks for still applies on landing.
+ */
+type CarouselScrollMode = "page" | "item" | "viewport";
+type CarouselAutoplayStepMode = CarouselScrollMode;
 type CarouselAutoplayMode = "continuous" | CarouselAutoplayStepMode;
 type CarouselAutoplayDirection = "forwards" | "backwards";
 /** What to do once a carousel that does not loop runs out of content */
@@ -754,8 +766,9 @@ type CarouselAutoplayOptions<CanEnd extends boolean = false> =
         : { atEnd?: NoAtEnd; pauseAtEnd?: NoPauseAtEnd }))
   | (CarouselAutoplayBase & {
       /**
-       * Steps to the next item, or to the next viewport worth of them — a page
-       * being the same move the prev / next buttons make. Items by default.
+       * How far each step goes: to the next item, to the next viewport worth of
+       * them, or by the viewport itself. The same three the prev / next buttons
+       * take, see {@link CarouselScrollMode}. Items by default.
        */
       mode?: CarouselAutoplayStepMode;
       /** How long to wait between steps, in milliseconds. Defaults to 3000 */
@@ -908,12 +921,18 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
 
     /**
      * Scroll the whole page (the container client width)
+     *
+     * `alignToItem` is what separates a `page` from a `viewport`: both start out
+     * as one viewport's worth, and a page then trims it back to the edge of the
+     * item it would otherwise cut in half. Without that trim it moves by exactly
+     * what the viewport can show and lets the items fall where they may.
      */
     const handleScrollPage = useCallback(
       (
         direction: "forwards" | "backwards",
         container: HTMLElement,
         items: HTMLElement[],
+        { alignToItem = true }: { alignToItem?: boolean } = {},
       ) => {
         const currentScroll = container.scrollLeft;
         const offset = rootRef.current
@@ -924,7 +943,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           (direction === "forwards" ? 1 : -1);
         // If multiple items, we can be more precise and scroll so the next / prev
         // item that is not fully visible becomes fully visible after page scroll.
-        if (items.length > 1) {
+        if (alignToItem && items.length > 1) {
           if (direction === "forwards") {
             const nextItem = items.find(
               (item) =>
@@ -1141,123 +1160,6 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       [boundaryOffset, clearAnimation, scrollIntoViewNearest, snappedScrollTo],
     );
 
-    /**
-     * Scrolls the container to the next slide until hitting the end of the container
-     */
-    const handleScrollToNext = useCallback(() => {
-      clearAnimation();
-      const container = viewportRef?.current;
-      const root = rootRef?.current;
-      if (root && container && container.scrollLeft < container.scrollWidth) {
-        // this is a ref, although it's in a state to be able to pass it around,
-        // it is safe to mutate it, using the setter would cause unwanted re-renders
-        // eslint-disable-next-line react-hooks/immutability
-        container.style.scrollSnapType =
-          scrollStateRef?.current?.scrollSnapType ?? "";
-        if (loop) {
-          // start from the middle of the repeated content, so the scroll we are
-          // about to animate cannot run out of content and be cut short by a wrap
-          recenterLoopScroll(container);
-        }
-        const items = Array.from(
-          container.querySelectorAll(":scope [data-carousel-content] > *"),
-        ) as HTMLElement[];
-        if (items.length === 1) {
-          handleScrollPage("forwards", container, items);
-          return;
-        }
-        const currentScroll = container.scrollLeft;
-        const containerOffsetWidth = container.offsetWidth;
-        const { x: boundaryOffsetX } = getBoundaryOffset(boundaryOffset, root);
-        const isNextItem = (item: HTMLElement) => {
-          return (
-            getOffsetLeft(item, container) + item.offsetWidth >
-            Math.ceil(currentScroll + containerOffsetWidth - boundaryOffsetX)
-          );
-        };
-        const nextItem = items.find(isNextItem) ?? items[items.length - 1];
-        if (nextItem) {
-          if (
-            nextItem.offsetWidth >=
-            container.offsetWidth - boundaryOffsetX * 2
-          ) {
-            handleScrollPage("forwards", container, items);
-          } else {
-            scrollIntoView(nextItem, container, "forwards");
-          }
-        }
-      }
-    }, [
-      boundaryOffset,
-      clearAnimation,
-      handleScrollPage,
-      loop,
-      viewportRef,
-      scrollIntoView,
-      scrollStateRef,
-    ]);
-
-    /**
-     * Scrolls the container to the previous slide until hitting the start of the container
-     */
-    const handleScrollToPrev = useCallback(() => {
-      clearAnimation();
-      const container = viewportRef?.current;
-      const root = rootRef?.current;
-      // when looping there is always something before the current position
-      if (root && container && (loop || container.scrollLeft > 0)) {
-        // this is a ref, although it's in a state to be able to pass it around,
-        // it is safe to mutate it, using the setter would cause unwanted re-renders
-        // eslint-disable-next-line react-hooks/immutability
-        container.style.scrollSnapType =
-          scrollStateRef?.current?.scrollSnapType ?? "";
-        if (loop) {
-          // start from the middle of the repeated content, so the scroll we are
-          // about to animate cannot run out of content and be cut short by a wrap
-          recenterLoopScroll(container);
-        }
-        const items = Array.from(
-          container.querySelectorAll(":scope [data-carousel-content] > *"),
-        ) as HTMLElement[];
-        if (items.length === 1) {
-          handleScrollPage("backwards", container, items);
-          return;
-        }
-        const currentScroll = container.scrollLeft;
-        const { x: boundaryOffsetX } = getBoundaryOffset(boundaryOffset, root);
-        const isPrevItem = (item: HTMLElement) => {
-          return (
-            currentScroll > getOffsetLeft(item, container) - boundaryOffsetX
-          );
-        };
-        const prevItems = items.filter(isPrevItem);
-        const prevItem = prevItems[prevItems.length - 1] ?? items[0];
-        if (prevItem) {
-          if (
-            prevItem.offsetWidth >=
-            container.offsetWidth - boundaryOffsetX * 2
-          ) {
-            handleScrollPage("backwards", container, items);
-          } else {
-            scrollIntoView(prevItem, container, "backwards");
-          }
-        }
-      }
-    }, [
-      boundaryOffset,
-      clearAnimation,
-      handleScrollPage,
-      loop,
-      viewportRef,
-      scrollIntoView,
-      scrollStateRef,
-    ]);
-
-    /**
-     * Moves by exactly one item. This is not what the prev / next buttons do:
-     * those move by a viewport worth of items at a time, which is why they are
-     * called pages.
-     */
     const scrollToAdjacentItem = useCallback(
       (direction: "forwards" | "backwards") => {
         const container = viewportRef?.current;
@@ -1339,6 +1241,152 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       },
       [boundaryOffset, loop, scrollIntoView, viewportRef],
     );
+
+    /**
+     * Scrolls the container to the next slide until hitting the end of the
+     * container. How far that is depends on the mode, `page` by default.
+     */
+    const handleScrollToNext = useCallback(
+      (mode: CarouselScrollMode = "page") => {
+        if (mode === "item") {
+          scrollToAdjacentItem("forwards");
+          return;
+        }
+        clearAnimation();
+        const container = viewportRef?.current;
+        const root = rootRef?.current;
+        if (root && container && container.scrollLeft < container.scrollWidth) {
+          // this is a ref, although it's in a state to be able to pass it around,
+          // it is safe to mutate it, using the setter would cause unwanted re-renders
+          // eslint-disable-next-line react-hooks/immutability
+          container.style.scrollSnapType =
+            scrollStateRef?.current?.scrollSnapType ?? "";
+          if (loop) {
+            // start from the middle of the repeated content, so the scroll we are
+            // about to animate cannot run out of content and be cut short by a wrap
+            recenterLoopScroll(container);
+          }
+          const items = Array.from(
+            container.querySelectorAll(":scope [data-carousel-content] > *"),
+          ) as HTMLElement[];
+          if (mode === "viewport" || items.length === 1) {
+            handleScrollPage("forwards", container, items, {
+              alignToItem: mode !== "viewport",
+            });
+            return;
+          }
+          const currentScroll = container.scrollLeft;
+          const containerOffsetWidth = container.offsetWidth;
+          const { x: boundaryOffsetX } = getBoundaryOffset(
+            boundaryOffset,
+            root,
+          );
+          const isNextItem = (item: HTMLElement) => {
+            return (
+              getOffsetLeft(item, container) + item.offsetWidth >
+              Math.ceil(currentScroll + containerOffsetWidth - boundaryOffsetX)
+            );
+          };
+          const nextItem = items.find(isNextItem) ?? items[items.length - 1];
+          if (nextItem) {
+            if (
+              nextItem.offsetWidth >=
+              container.offsetWidth - boundaryOffsetX * 2
+            ) {
+              handleScrollPage("forwards", container, items);
+            } else {
+              scrollIntoView(nextItem, container, "forwards");
+            }
+          }
+        }
+      },
+      [
+        boundaryOffset,
+        clearAnimation,
+        handleScrollPage,
+        loop,
+        scrollToAdjacentItem,
+        viewportRef,
+        scrollIntoView,
+        scrollStateRef,
+      ],
+    );
+
+    /**
+     * Scrolls the container to the previous slide until hitting the start of
+     * the container. How far that is depends on the mode, `page` by default.
+     */
+    const handleScrollToPrev = useCallback(
+      (mode: CarouselScrollMode = "page") => {
+        if (mode === "item") {
+          scrollToAdjacentItem("backwards");
+          return;
+        }
+        clearAnimation();
+        const container = viewportRef?.current;
+        const root = rootRef?.current;
+        // when looping there is always something before the current position
+        if (root && container && (loop || container.scrollLeft > 0)) {
+          // this is a ref, although it's in a state to be able to pass it around,
+          // it is safe to mutate it, using the setter would cause unwanted re-renders
+          // eslint-disable-next-line react-hooks/immutability
+          container.style.scrollSnapType =
+            scrollStateRef?.current?.scrollSnapType ?? "";
+          if (loop) {
+            // start from the middle of the repeated content, so the scroll we are
+            // about to animate cannot run out of content and be cut short by a wrap
+            recenterLoopScroll(container);
+          }
+          const items = Array.from(
+            container.querySelectorAll(":scope [data-carousel-content] > *"),
+          ) as HTMLElement[];
+          if (mode === "viewport" || items.length === 1) {
+            handleScrollPage("backwards", container, items, {
+              alignToItem: mode !== "viewport",
+            });
+            return;
+          }
+          const currentScroll = container.scrollLeft;
+          const { x: boundaryOffsetX } = getBoundaryOffset(
+            boundaryOffset,
+            root,
+          );
+          const isPrevItem = (item: HTMLElement) => {
+            return (
+              currentScroll > getOffsetLeft(item, container) - boundaryOffsetX
+            );
+          };
+          const prevItems = items.filter(isPrevItem);
+          const prevItem = prevItems[prevItems.length - 1] ?? items[0];
+          if (prevItem) {
+            if (
+              prevItem.offsetWidth >=
+              container.offsetWidth - boundaryOffsetX * 2
+            ) {
+              handleScrollPage("backwards", container, items);
+            } else {
+              scrollIntoView(prevItem, container, "backwards");
+            }
+          }
+        }
+      },
+      [
+        boundaryOffset,
+        clearAnimation,
+        handleScrollPage,
+        loop,
+        scrollToAdjacentItem,
+        viewportRef,
+        scrollIntoView,
+        scrollStateRef,
+      ],
+    );
+
+    /**
+     * Moves by exactly one item. This is what `mode: "item"` asks for, on a
+     * button or on the autoplay: `page`, the default, moves by a viewport worth
+     * of items at a time instead.
+     */
 
     // Read the autoplay options out one at a time rather than handing the object
     // to the effect: it is nearly always written inline, so its identity changes
@@ -1576,17 +1624,23 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           handleEnd();
           return;
         }
-        if (autoplayMode === "page") {
-          // the same move the prev / next buttons make
-          if (sign > 0) {
-            handleScrollToNext();
-          } else {
-            handleScrollToPrev();
+        const direction = sign > 0 ? "forwards" : "backwards";
+        // `continuous` scrolls by the frame and never comes through here, so
+        // whatever is left is a mode the buttons understand
+        const stepMode: CarouselScrollMode =
+          autoplayMode === "continuous" ? "item" : autoplayMode;
+        if (stepMode === "item") {
+          // asked for separately rather than through the buttons: this is the
+          // one that can say there is no item left to step onto, whatever the
+          // remaining scroll distance says
+          if (!scrollToAdjacentItem(direction)) {
+            handleEnd();
           }
-        } else if (!scrollToAdjacentItem(sign > 0 ? "forwards" : "backwards")) {
-          // there is no item left to step onto, whatever the remaining scroll
-          // distance says
-          handleEnd();
+        } else if (direction === "forwards") {
+          // the same move the next button makes, in the same mode
+          handleScrollToNext(stepMode);
+        } else {
+          handleScrollToPrev(stepMode);
         }
       };
 
@@ -3172,10 +3226,13 @@ const CarouselItem = forwardRef<HTMLElement, CarouselItemProps>(
 
 CarouselItem.displayName = "Carousel.Item";
 
-type CarouselNextPageProps = ComponentPropsWithoutRef<"button">;
+type CarouselNextPageProps = ComponentPropsWithoutRef<"button"> & {
+  /** How far a click goes. `"page"` by default, see {@link CarouselScrollMode} */
+  mode?: CarouselScrollMode;
+};
 
 const CarouselNextPage = forwardRef<HTMLButtonElement, CarouselNextPageProps>(
-  ({ children, onClick, disabled, ...props }, ref) => {
+  ({ children, onClick, disabled, mode, ...props }, ref) => {
     const { scrollsForwards, handleScrollToNext } = useContext(CarouselContext);
 
     return (
@@ -3183,7 +3240,7 @@ const CarouselNextPage = forwardRef<HTMLButtonElement, CarouselNextPageProps>(
         ref={ref}
         {...props}
         onClick={(event) => {
-          handleScrollToNext();
+          handleScrollToNext(mode);
           onClick?.(event);
         }}
         disabled={disabled ?? !scrollsForwards}
@@ -3196,10 +3253,13 @@ const CarouselNextPage = forwardRef<HTMLButtonElement, CarouselNextPageProps>(
 
 CarouselNextPage.displayName = "Carousel.NextPage";
 
-type CarouselPrevPageProps = ComponentPropsWithoutRef<"button">;
+type CarouselPrevPageProps = ComponentPropsWithoutRef<"button"> & {
+  /** How far a click goes. `"page"` by default, see {@link CarouselScrollMode} */
+  mode?: CarouselScrollMode;
+};
 
 const CarouselPrevPage = forwardRef<HTMLButtonElement, CarouselPrevPageProps>(
-  ({ children, onClick, disabled, ...props }, ref) => {
+  ({ children, onClick, disabled, mode, ...props }, ref) => {
     const { scrollsBackwards, handleScrollToPrev } =
       useContext(CarouselContext);
 
@@ -3208,7 +3268,7 @@ const CarouselPrevPage = forwardRef<HTMLButtonElement, CarouselPrevPageProps>(
         ref={ref}
         {...props}
         onClick={(event) => {
-          handleScrollToPrev();
+          handleScrollToPrev(mode);
           onClick?.(event);
         }}
         disabled={disabled ?? !scrollsBackwards}
@@ -3381,6 +3441,7 @@ export type {
   CarouselPrevPageProps,
   CarouselReducedMotion,
   CarouselRootProps,
+  CarouselScrollMode,
   CarouselViewportProps,
 };
 
@@ -3438,6 +3499,8 @@ export declare namespace Carousel {
   export type BoundaryOffset = CarouselBoundaryOffset;
   /** What to do about `prefers-reduced-motion: reduce` */
   export type ReducedMotion = CarouselReducedMotion;
+  /** How far one prev / next move goes */
+  export type ScrollMode = CarouselScrollMode;
   /** What `Carousel.useCarouselContext()` hands back */
   export type Context = CarouselContext;
 }

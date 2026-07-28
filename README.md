@@ -135,17 +135,17 @@ carousel taking an item away from someone reading it on a phone. Scrolling or dr
 once the carousel has come to rest: the momentum, the snapping and the loop's own corrections all count, so it runs
 from the position the carousel settles on rather than from the moment the hand left it.
 
-| Option               | Type                               | Default      | Description                                                                                                                                           |
-| -------------------- | ---------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`               | `"item" \| "page" \| "continuous"` | `"item"`     | `item` steps to the next item, `page` makes the same move as the prev/next buttons, `continuous` scrolls at a steady speed without stopping on items. |
-| `direction`          | `"forwards" \| "backwards"`        | `"forwards"` | Which way to go.                                                                                                                                      |
-| `interval`           | `number`                           | `3000`       | Milliseconds between steps. `item` and `page` only.                                                                                                   |
-| `speed`              | `number`                           | `60`         | Pixels per second. `continuous` only.                                                                                                                 |
-| `atEnd`              | `"rewind" \| "reverse" \| "stop"`  | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. Not available with a literal `loop`.    |
-| `pauseAtEnd`         | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with a literal `loop`.                                    |
-| `pauseOnHover`       | `boolean`                          | `true`       | Pause while the pointer is over the carousel.                                                                                                         |
-| `pauseOnFocus`       | `boolean`                          | `true`       | Pause while the focus is anywhere inside the carousel, items included.                                                                                |
-| `pauseOnInteraction` | `number \| false`                  | `1500`       | Milliseconds to wait after a scroll or a drag has settled before picking up again. `false` carries on regardless.                                     |
+| Option               | Type                                             | Default      | Description                                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`               | `"item" \| "page" \| "viewport" \| "continuous"` | `"item"`     | How far each step goes, the same three the prev/next buttons take (see [How far a move goes](#how-far-a-move-goes)), plus `continuous`, which scrolls at a steady speed without stopping on items. |
+| `direction`          | `"forwards" \| "backwards"`                      | `"forwards"` | Which way to go.                                                                                                                                                                                   |
+| `interval`           | `number`                                         | `3000`       | Milliseconds between steps. `item` and `page` only.                                                                                                                                                |
+| `speed`              | `number`                                         | `60`         | Pixels per second. `continuous` only.                                                                                                                                                              |
+| `atEnd`              | `"rewind" \| "reverse" \| "stop"`                | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. Not available with a literal `loop`.                                                 |
+| `pauseAtEnd`         | `number`                                         | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with a literal `loop`.                                                                                 |
+| `pauseOnHover`       | `boolean`                                        | `true`       | Pause while the pointer is over the carousel.                                                                                                                                                      |
+| `pauseOnFocus`       | `boolean`                                        | `true`       | Pause while the focus is anywhere inside the carousel, items included.                                                                                                                             |
+| `pauseOnInteraction` | `number \| false`                                | `1500`       | Milliseconds to wait after a scroll or a drag has settled before picking up again. `false` carries on regardless.                                                                                  |
 
 The options that do not apply to a given configuration are compile errors rather than settings that quietly do nothing,
 and the type carries the reason: hovering `atEnd` on a looping carousel says it does not apply there, since a looping
@@ -230,29 +230,50 @@ animation). Use `asChild` to merge onto your own element.
 
 ### `Carousel.NextPage`
 
-A button that scrolls the carousel forwards by one page or to the next partially-visible item. Automatically disabled
-when there is no more content to scroll forwards. Renders a `<button>`.
+A button that scrolls the carousel forwards. How far is up to `mode`. Automatically disabled when there is no more
+content to scroll forwards. Renders a `<button>`.
 
 | Prop       | Type                                   | Default            | Description                                                                                                           |
 | ---------- | -------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `mode`     | `"page" \| "item" \| "viewport"`       | `"page"`           | How far a click goes. See [How far a move goes](#how-far-a-move-goes).                                                |
 | `disabled` | `boolean`                              | `!scrollsForwards` | Overrides the automatic disabled state. Pass `false` to always keep the button enabled regardless of scroll position. |
 | `onClick`  | `MouseEventHandler<HTMLButtonElement>` | n/a                | Called after the scroll action is triggered.                                                                          |
 | `ref`      | `Ref<HTMLButtonElement>`               | n/a                | Forwarded ref to the `<button>`.                                                                                      |
 | `...props` | `ComponentPropsWithoutRef<"button">`   | n/a                | All standard `<button>` props.                                                                                        |
 
+#### How far a move goes
+
+`mode` is the same set of answers on both buttons and on [`autoplay`](#autoplay), so a carousel whose autoplay steps by
+item and whose buttons page through it says so in the same words.
+
+| Mode         | What one move does                                                                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"page"`     | Brings the next item that is not fully in view fully into view. The default, and what keeps a partly-seen item from staying partly seen.                    |
+| `"item"`     | Steps to the next item along, whether or not the current one is fully in view. An item practically arrived at already is passed over for the one behind it. |
+| `"viewport"` | Moves by exactly what the viewport can show, ignoring where the items fall. Whatever `scroll-snap-type` you have asked for still applies once it lands.     |
+
+All three respect `boundaryOffset`, so nothing lands behind the content fade, and all three animate unless the user has
+asked for [reduced motion](#reduced-motion).
+
+```tsx
+<Carousel.NextPage mode="item">next</Carousel.NextPage>
+<Carousel.Root autoplay={{ mode: "item", interval: 4000 }} />
+```
+
 ---
 
 ### `Carousel.PrevPage`
 
-A button that scrolls the carousel backwards by one page or to the previous partially-visible item. Automatically
-disabled when the carousel is at the start. Renders a `<button>`.
+A button that scrolls the carousel backwards, as far as `mode` says. Automatically disabled when the carousel is at the
+start. Renders a `<button>`.
 
-| Prop       | Type                                   | Default             | Description                                  |
-| ---------- | -------------------------------------- | ------------------- | -------------------------------------------- |
-| `disabled` | `boolean`                              | `!scrollsBackwards` | Overrides the automatic disabled state.      |
-| `onClick`  | `MouseEventHandler<HTMLButtonElement>` | n/a                 | Called after the scroll action is triggered. |
-| `ref`      | `Ref<HTMLButtonElement>`               | n/a                 | Forwarded ref to the `<button>`.             |
-| `...props` | `ComponentPropsWithoutRef<"button">`   | n/a                 | All standard `<button>` props.               |
+| Prop       | Type                                   | Default             | Description                                                            |
+| ---------- | -------------------------------------- | ------------------- | ---------------------------------------------------------------------- |
+| `mode`     | `"page" \| "item" \| "viewport"`       | `"page"`            | How far a click goes. See [How far a move goes](#how-far-a-move-goes). |
+| `disabled` | `boolean`                              | `!scrollsBackwards` | Overrides the automatic disabled state.                                |
+| `onClick`  | `MouseEventHandler<HTMLButtonElement>` | n/a                 | Called after the scroll action is triggered.                           |
+| `ref`      | `Ref<HTMLButtonElement>`               | n/a                 | Forwarded ref to the `<button>`.                                       |
+| `...props` | `ComponentPropsWithoutRef<"button">`   | n/a                 | All standard `<button>` props.                                         |
 
 ---
 
@@ -359,8 +380,9 @@ const [mode, setMode] = useState<Carousel.AutoplayMode>("item");
 | `CarouselNextPageProps`           | `Carousel.NextPageProps`           | Props of `Carousel.NextPage`.                                                                                        |
 | `CarouselPrevPageProps`           | `Carousel.PrevPageProps`           | Props of `Carousel.PrevPage`.                                                                                        |
 | `CarouselAutoplayOptions<CanEnd>` | `Carousel.AutoplayOptions<CanEnd>` | The object form of the `autoplay` prop. See the note on `CanEnd` below.                                              |
-| `CarouselAutoplayMode`            | `Carousel.AutoplayMode`            | `"continuous" \| "item" \| "page"`.                                                                                  |
-| `CarouselAutoplayStepMode`        | `Carousel.AutoplayStepMode`        | Just the stepping modes, `"item" \| "page"`, the ones that take an `interval`.                                       |
+| `CarouselAutoplayMode`            | `Carousel.AutoplayMode`            | `CarouselScrollMode \| "continuous"`.                                                                                |
+| `CarouselAutoplayStepMode`        | `Carousel.AutoplayStepMode`        | The stepping modes, the ones that take an `interval`. The same set as `CarouselScrollMode`.                          |
+| `CarouselScrollMode`              | `Carousel.ScrollMode`              | How far one prev/next move goes: `"page" \| "item" \| "viewport"`.                                                   |
 | `CarouselAutoplayDirection`       | `Carousel.AutoplayDirection`       | `"forwards" \| "backwards"`.                                                                                         |
 | `CarouselAutoplayAtEnd`           | `Carousel.AutoplayAtEnd`           | `"rewind" \| "reverse" \| "stop"`.                                                                                   |
 | `CarouselBoundaryOffset`          | `Carousel.BoundaryOffset`          | The `boundaryOffset` prop: a point, or a function returning one.                                                     |
