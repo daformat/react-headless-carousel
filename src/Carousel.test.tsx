@@ -1081,6 +1081,122 @@ describe("Carousel", () => {
       expect(vp.style.scrollSnapType).toBe("none");
     });
 
+    it("carries the focus along when it sits on a copy being teleported", () => {
+      render(
+        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop>
+          <Carousel.Viewport>
+            <Carousel.Content>
+              {Array.from({ length: CHILDREN_COUNT }, (_, i) => (
+                <Carousel.Item key={i}>
+                  <button type="button">Item {i}</button>
+                </Carousel.Item>
+              ))}
+            </Carousel.Content>
+          </Carousel.Viewport>
+        </Carousel.Root>,
+      );
+      const vp = getViewport();
+      const items = getItems();
+      // a copy in the last set, which the wrap is about to carry off screen
+      const copy = items[items.length - 2] as HTMLElement;
+      expect(copy.hasAttribute("data-loop-clone")).toBe(true);
+      const button = copy.querySelector("button") as HTMLButtonElement;
+      button.focus();
+
+      const from = vp.scrollWidth - vp.clientWidth - 10;
+      vp.scrollLeft = from;
+      fireEvent.scroll(vp);
+
+      // it teleported by whole copies, as it always does
+      const delta = vp.scrollLeft - from;
+      expect(delta).not.toBe(0);
+      expect(Math.abs(delta % NATURAL_WIDTH)).toBe(0);
+
+      // and the focus went with it: same markup, same place on screen, an
+      // element the user can still see the focus ring on
+      const twin = items[
+        items.indexOf(copy) + (delta / NATURAL_WIDTH) * CHILDREN_COUNT
+      ] as HTMLElement;
+      expect(document.activeElement).toBe(twin.querySelector("button"));
+    });
+
+    it("leaves the focus alone when it sits on one of the children", () => {
+      render(
+        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop>
+          <Carousel.Viewport>
+            <Carousel.Content>
+              {Array.from({ length: CHILDREN_COUNT }, (_, i) => (
+                <Carousel.Item key={i}>
+                  <button type="button">Item {i}</button>
+                </Carousel.Item>
+              ))}
+            </Carousel.Content>
+          </Carousel.Viewport>
+        </Carousel.Root>,
+      );
+      const vp = getViewport();
+      // the children themselves are what assistive tech can see: the focus
+      // stays on one rather than being moved into a copy that it cannot
+      const original = getOriginalItems()[0] as HTMLElement;
+      const button = original.querySelector("button") as HTMLButtonElement;
+      button.focus();
+
+      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      fireEvent.scroll(vp);
+
+      expect(document.activeElement).toBe(button);
+    });
+
+    it("stays where it is when a click starts no momentum", () => {
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+      const parked = ITEM_WIDTH * 8;
+      vp.scrollLeft = parked;
+
+      // every position the click causes to be written, so that a momentary bad
+      // one cannot hide behind the restore that follows it
+      const written: number[] = [];
+      const descriptor = Object.getOwnPropertyDescriptor(
+        HTMLElement.prototype,
+        "scrollLeft",
+      ) as PropertyDescriptor;
+      Object.defineProperty(HTMLElement.prototype, "scrollLeft", {
+        ...descriptor,
+        set(this: HTMLElement, value: number) {
+          if (this === vp) {
+            written.push(value);
+          }
+          descriptor.set?.call(this, value);
+        },
+        configurable: true,
+      });
+
+      try {
+        // a click: the pointer goes down and comes back up without moving, so
+        // there is no velocity to coast on
+        fireEvent.pointerDown(vp, {
+          pointerType: "mouse",
+          pointerId: 1,
+          clientX: 100,
+          clientY: 0,
+        });
+        fireEvent.pointerUp(vp, {
+          pointerType: "mouse",
+          pointerId: 1,
+          clientX: 100,
+          clientY: 0,
+        });
+      } finally {
+        Object.defineProperty(HTMLElement.prototype, "scrollLeft", descriptor);
+      }
+
+      // a `NaN` here would read as 0 in a browser, and a looping carousel takes
+      // 0 for a carousel about to run out of content: it would wrap, landing
+      // back on the first of the children
+      expect(written.filter((value) => !Number.isFinite(value))).toEqual([]);
+      expect(vp.scrollLeft).toBe(parked);
+    });
+
     it("keeps the snapping the user asked for through a wrap", () => {
       vi.useFakeTimers();
       renderLoopCarousel({ scrollSnapType: "x mandatory" });

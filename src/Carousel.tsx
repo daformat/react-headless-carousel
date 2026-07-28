@@ -341,12 +341,79 @@ const setLoopScrollLeft = (
 ) => {
   const reselect = reselectSnapTarget && getIsChromium();
   const scrollSnapType = container.style.scrollSnapType;
+  const before = container.scrollLeft;
   if (reselect) {
     container.style.scrollSnapType = "none";
   }
   container.scrollTo({ left: scrollLeft, behavior: "instant" });
   if (reselect) {
     container.style.scrollSnapType = scrollSnapType;
+  }
+  relocateFocusToLoopTwin(container, container.scrollLeft - before);
+};
+
+/**
+ * Follows the focus across a teleport.
+ *
+ * The jump leaves the pixels on screen exactly as they were, but the elements
+ * showing them are a whole number of copies further along — so anything focused
+ * inside a copy has just been carried off screen, and the focus ring with it.
+ * This hands the focus to the element that took its place: the same position in
+ * the copy now standing where the old one stood, which after a recentre is
+ * usually the child it was copied from.
+ *
+ * Only the copies are followed. A real child that goes off screen keeps the
+ * focus where it is, rather than having it moved into a copy that is hidden
+ * from assistive technology.
+ */
+const relocateFocusToLoopTwin = (container: HTMLElement, delta: number) => {
+  const active = document.activeElement;
+  if (
+    !delta ||
+    !(active instanceof HTMLElement) ||
+    !active.closest("[data-loop-clone]")
+  ) {
+    return;
+  }
+  const item = active.closest<HTMLElement>("[data-carousel-item]");
+  const content = item?.parentElement;
+  const metrics = measureLoopMetrics(container);
+  const childrenCount = Number(
+    content?.getAttribute("data-carousel-loop-size") ?? 0,
+  );
+  if (!item || !content || !metrics || !childrenCount) {
+    return;
+  }
+  // the copies repeat every childrenCount items, so the same number of periods
+  // the scroll moved by is the number of copies the focus has to move by
+  const items = Array.from(content.children);
+  const periods = Math.round(delta / metrics.naturalWidth);
+  const twin = items[items.indexOf(item) + periods * childrenCount];
+  if (!(twin instanceof HTMLElement)) {
+    return;
+  }
+  // every copy renders the same markup, so the element that took the focused
+  // one's place sits at the same position within its item
+  const path: number[] = [];
+  for (
+    let node: HTMLElement = active;
+    node !== item && node.parentElement;
+    node = node.parentElement
+  ) {
+    path.unshift(
+      Array.prototype.indexOf.call(node.parentElement.children, node),
+    );
+  }
+  let target: Element = twin;
+  for (const index of path) {
+    const next = target.children[index];
+    if (!next) {
+      return;
+    }
+    target = next;
+  }
+  if (target instanceof HTMLElement) {
+    target.focus({ preventScroll: true });
   }
 };
 
@@ -2731,7 +2798,14 @@ const getFinalScroll = (
   decelerationFactor: number,
   minVelocity = 0.05,
 ) => {
-  if (decelerationFactor >= 1) {
+  // Anything already slower than the floor coasts nowhere, and the arithmetic
+  // below cannot say so: it counts the frames it takes to decelerate *down* to
+  // minVelocity, which for something slower than that is a negative number of
+  // them. A pointer that never moved makes it worse — dividing by a velocity of
+  // zero counts infinitely many frames, and `0 * Infinity` is `NaN`. Assigning
+  // that to `scrollLeft` reads as 0, which a looping carousel then rescues by
+  // wrapping: a click, and the carousel is back on its first item.
+  if (decelerationFactor >= 1 || !(Math.abs(velocity) >= minVelocity)) {
     return { finalScroll: initialScroll, iterations: 0 };
   }
   // Number of frames until velocity drops below minVelocity
@@ -2745,6 +2819,11 @@ const getFinalScroll = (
       FRAME_DURATION *
       (1 - Math.pow(decelerationFactor, iterations))) /
       (1 - decelerationFactor);
+
+  // a deceleration that barely decelerates can still run the sum out of range
+  if (!Number.isFinite(finalScroll)) {
+    return { finalScroll: initialScroll, iterations: 0 };
+  }
 
   return { finalScroll, iterations };
 };
