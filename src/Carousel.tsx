@@ -686,14 +686,14 @@ type CarouselAutoplayEndOptions = {
  * type 'undefined'".
  */
 type NoSpeed =
-  "`speed` is for mode: 'continuous' — stepping takes `interval` instead";
+  "`speed` is for mode: 'continuous', stepping takes `interval` instead";
 type NoInterval =
-  "`interval` is for mode: 'item' and mode: 'page' — a continuous scroll takes `speed` instead";
+  "`interval` is for mode: 'item' and mode: 'page', a continuous scroll takes `speed` instead";
 type NoPauseAtEndHere = "`pauseAtEnd` is for mode: 'continuous'";
 type NoAtEnd =
-  "`atEnd` does not apply with loop — a looping carousel never runs out of content";
+  "`atEnd` does not apply with loop: a looping carousel never runs out of content";
 type NoPauseAtEnd =
-  "`pauseAtEnd` does not apply with loop — a looping carousel never reaches an end to wait at";
+  "`pauseAtEnd` does not apply with loop: a looping carousel never reaches an end to wait at";
 
 /**
  * `CanEnd` says whether the carousel is one that can run out of content, which
