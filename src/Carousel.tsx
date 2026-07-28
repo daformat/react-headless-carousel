@@ -63,158 +63,6 @@ const MIN_AUTOPLAY_STEP = 0.5;
  */
 const WHEEL_GESTURE_TIMEOUT = 250;
 
-/* ------------------------------------------------------------------------ *
- * TEMPORARY: tracing for the looping carousel. Remove once the tabbing race
- * is understood — every call site is marked with `LOOP_DEBUG`.
- *
- *   window.__CAROUSEL_DEBUG__ = true    // start recording
- *   window.__carouselTrace.dump()       // read it back
- *   window.__carouselTrace.clear()      // start again
- * ------------------------------------------------------------------------ */
-type LoopTraceEntry = { t: number; label: string } & Record<string, unknown>;
-const loopTrace: LoopTraceEntry[] = [];
-const LOOP_DEBUG_LIMIT = 20000;
-
-type LoopDebugWindow = Window & {
-  __CAROUSEL_DEBUG__?: boolean | string;
-  __carouselTrace?: unknown;
-};
-
-/**
- * LOOP_DEBUG: `true` records every carousel on the page, which on a page with
- * an autoplay or two fills the buffer in about a second. Setting it to a
- * carousel's id instead records only that one.
- */
-const loopDebugFlag = () =>
-  typeof window === "undefined"
-    ? undefined
-    : (window as LoopDebugWindow).__CAROUSEL_DEBUG__;
-
-/**
- * LOOP_DEBUG: names each carousel on the page, so that a trace taken with more
- * than one of them can be told apart afterwards.
- */
-let nextLoopDebugId = 1;
-const loopDebugIdOf = (container: MaybeNull<HTMLElement>) => {
-  if (!container) {
-    return null;
-  }
-  if (!container.dataset.carouselDebugId) {
-    container.dataset.carouselDebugId =
-      container.id || `carousel-${nextLoopDebugId++}`;
-  }
-  return container.dataset.carouselDebugId;
-};
-
-/** LOOP_DEBUG: records one moment, and does nothing at all when switched off */
-const traceLoop = (
-  label: string,
-  container: MaybeNull<HTMLElement>,
-  data: Record<string, unknown> = {},
-) => {
-  // switched off, which is the usual case: one property read and out, without
-  // so much as naming the carousel
-  const flag = loopDebugFlag();
-  if (!flag) {
-    return;
-  }
-  const carousel = loopDebugIdOf(container);
-  if (flag !== true && flag !== carousel) {
-    return;
-  }
-  loopTrace.push({
-    t: Math.round(performance.now()),
-    carousel,
-    label,
-    ...data,
-  });
-  if (loopTrace.length > LOOP_DEBUG_LIMIT) {
-    loopTrace.shift();
-  }
-};
-
-/** LOOP_DEBUG: says which item an element belongs to, and whether it is a copy */
-const traceItem = (element: MaybeNull<Element>) => {
-  const item = element?.closest?.("[data-carousel-item]");
-  const content = item?.parentElement;
-  if (!item || !content) {
-    return null;
-  }
-  return {
-    index: Array.prototype.indexOf.call(content.children, item),
-    copy: item.hasAttribute("data-loop-clone"),
-  };
-};
-
-if (typeof window !== "undefined") {
-  (window as LoopDebugWindow).__carouselTrace = {
-    get entries() {
-      return loopTrace;
-    },
-    clear: () => {
-      loopTrace.length = 0;
-    },
-    /** LOOP_DEBUG: which carousels the recording covers */
-    carousels: () => [...new Set(loopTrace.map((entry) => entry.carousel))],
-    /**
-     * The trace for one carousel, plus what it adds up to: every position it
-     * passed through, and how much of the movement between them was a teleport
-     * across whole copies — which shows nothing — against movement the eye can
-     * actually see. Pass the carousel's id (see `carousels()`) when the page
-     * holds more than one; the busiest one is used by default.
-     */
-    dump: (carousel?: string, period?: number) => {
-      const busiest = [...new Set(loopTrace.map((entry) => entry.carousel))]
-        .map((id) => ({
-          id,
-          count: loopTrace.filter((entry) => entry.carousel === id).length,
-        }))
-        .sort((a, b) => b.count - a.count)[0]?.id;
-      const only = carousel ?? (busiest as string | undefined);
-      const entries = loopTrace.filter(
-        (entry) => entry.carousel === only || entry.carousel === null,
-      );
-      const positions = entries.filter(
-        (entry) => typeof entry.scrollLeft === "number",
-      );
-      const guessedPeriod =
-        period ??
-        (entries.find((entry) => typeof entry.naturalWidth === "number")
-          ?.naturalWidth as number | undefined);
-      const steps = positions.slice(1).map((entry, index) => {
-        const previous = positions[index] as LoopTraceEntry;
-        const delta =
-          (entry.scrollLeft as number) - (previous.scrollLeft as number);
-        const periods = guessedPeriod ? Math.round(delta / guessedPeriod) : 0;
-        // A move of whole periods lands on identical pixels and shows nothing.
-        // Anything else is seen in full — including half a period, which is a
-        // real move of half a period and not a teleport that fell short.
-        const isTeleport =
-          !!guessedPeriod &&
-          periods !== 0 &&
-          Math.abs(delta - periods * guessedPeriod) <= 2;
-        return {
-          t: entry.t,
-          after: entry.label,
-          delta,
-          visible: isTeleport ? 0 : delta,
-        };
-      });
-      const backwards = steps.filter((step) => step.visible < -1);
-      return {
-        carousel: only,
-        period: guessedPeriod,
-        entries,
-        visibleBackwardsMoves: backwards,
-        worstBackwards: backwards.reduce(
-          (worst, step) => Math.min(worst, step.visible),
-          0,
-        ),
-      };
-    },
-  };
-}
-
 const CSS_VARS = Object.freeze({
   fadeSize: "--carousel-fade-size",
   fadeOffsetBackwards: "--carousel-fade-offset-backwards",
@@ -588,14 +436,6 @@ const setLoopScrollLeft = (
   if (reselect) {
     container.style.scrollSnapType = scrollSnapType;
   }
-  // LOOP_DEBUG
-  traceLoop("teleport", container, {
-    from: Math.round(before),
-    scrollLeft: Math.round(container.scrollLeft),
-    asked: Math.round(scrollLeft),
-    keepFocus,
-    by: new Error().stack?.split("\n")[2]?.trim().slice(0, 90),
-  });
   // `keepFocus` is for the jumps made on the focus's behalf: those move the
   // scroll to suit the focused element, so following the focus afterwards would
   // undo the very thing the jump was for
@@ -635,13 +475,6 @@ const relocateFocusToLoopTwin = (container: HTMLElement, delta: number) => {
   if (!target) {
     return;
   }
-  // LOOP_DEBUG
-  traceLoop("focus-follows-teleport", container, {
-    delta: Math.round(delta),
-    scrollLeft: Math.round(container.scrollLeft),
-    from: traceItem(active),
-    to: traceItem(target),
-  });
   focusLoopTwin(target);
 };
 
@@ -687,16 +520,6 @@ const teleportTowardsFocus = (
   const periods = backwards
     ? Math.ceil(gap / metrics.naturalWidth)
     : Math.floor(gap / metrics.naturalWidth);
-  // LOOP_DEBUG
-  traceLoop("tab-teleport-decision", container, {
-    scrollLeft: Math.round(start),
-    naturalWidth: metrics.naturalWidth,
-    targetLeft: Math.round(left),
-    gap: Math.round(gap),
-    periods,
-    backwards,
-    target: traceItem(target),
-  });
   if (!periods) {
     return 0;
   }
@@ -715,12 +538,6 @@ const teleportTowardsFocus = (
     // the viewport would land a whole period past what is already on screen.
     const copies = Math.round((start - left) / metrics.naturalWidth);
     const twin = getLoopTwin(target, copies);
-    // LOOP_DEBUG
-    traceLoop("focus-moved-instead", container, {
-      scrollLeft: Math.round(start),
-      wouldHaveBeen: Math.round(shifted),
-      to: traceItem(twin),
-    });
     if (twin) {
       focusLoopTwin(twin);
     }
@@ -1074,14 +891,6 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           // eslint-disable-next-line react-hooks/immutability
           state.focusScrollDestination = snappedScroll;
         }
-        // LOOP_DEBUG: the gap between these two is the frame the scroll waits
-        // out, and where a teleport can land in between
-        traceLoop("scroll-scheduled", container, {
-          scrollLeft: Math.round(container.scrollLeft),
-          asked: Math.round(targetScroll),
-          snapped: Math.round(snappedScroll),
-          behavior,
-        });
         // request animation frame to prevent Safari from being Safari
         requestAnimationFrame(() => {
           // A wrap can land inside the frame this waited out, moving every copy
@@ -1090,13 +899,8 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           // the content used to be, which is a journey of whole copies across
           // the whole carousel. Chromium fires this frame before the wrap gets
           // a chance; Firefox does not, which is where it shows.
-          const left = snappedScroll;
-          // LOOP_DEBUG
-          traceLoop("scroll-fires", container, {
-            scrollLeft: Math.round(container.scrollLeft),
-            goingTo: Math.round(left),
-            scheduledFor: Math.round(snappedScroll),
-          });
+          const carried = isForFocus ? state?.focusScrollDestination : null;
+          const left = carried ?? snappedScroll;
           container.scrollTo({
             left,
             behavior,
@@ -2507,10 +2311,6 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           settleWheelSnap();
         };
         const handleScroll = () => {
-          // LOOP_DEBUG: every position the carousel actually passes through
-          traceLoop("scroll", container, {
-            scrollLeft: Math.round(container.scrollLeft),
-          });
           const wrapped = wrapLoopScroll();
           const heading = scrollStateRef.current.focusScrollDestination;
           // Every engine, not just Chromium: a scroll cut short mid-glide ends
@@ -2641,14 +2441,6 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           // spent here, so that a focus we move ourselves below comes back
           // round as an ordinary one rather than as another tab
           lastTab.current = null;
-          // LOOP_DEBUG
-          traceLoop("focus-arrives", container, {
-            scrollLeft: Math.round(container.scrollLeft),
-            fromTab: !!tab,
-            recordedOnKeydown: tab ? Math.round(tab.scrollLeft) : null,
-            backwards: tab?.backwards ?? null,
-            target: traceItem(target),
-          });
           if (tab) {
             // Undo the jump the browser made to reveal the newly focused
             // element — but never past where the carousel has already got to.
@@ -2705,14 +2497,6 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
             scrollLeft: container.scrollLeft,
             backwards: event.shiftKey,
           };
-          // LOOP_DEBUG
-          traceLoop("tab-key", container, {
-            scrollLeft: Math.round(container.scrollLeft),
-            backwards: event.shiftKey,
-            from: traceItem(
-              event.target instanceof Element ? event.target : null,
-            ),
-          });
         }
       };
 
