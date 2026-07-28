@@ -322,10 +322,64 @@ const getLoopShift = (scrollLeft: number, metrics: LoopMetrics) =>
  */
 let isRelocatingLoopFocus = false;
 
-const focusLoopTwin = (twin: HTMLElement) => {
+const focusWithoutScrolling = (element: HTMLElement) => {
   isRelocatingLoopFocus = true;
-  twin.focus({ preventScroll: true });
+  element.focus({ preventScroll: true });
   isRelocatingLoopFocus = false;
+};
+
+/**
+ * Everything the browser will stop at when tabbing, near enough: what it leaves
+ * out (`display: none`, a closed `<details>`) is filtered out below anyway by
+ * having to be on screen.
+ */
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "area[href]",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "details",
+  "summary",
+  "iframe",
+  "object",
+  "embed",
+  "audio[controls]",
+  "video[controls]",
+  "[contenteditable]",
+  "[tabindex]",
+].join(",");
+
+/**
+ * What tabbing can land on inside the carousel, in document order. The loop's
+ * copies count: a copy on screen is a real part of the carousel to whoever is
+ * looking at it.
+ */
+const getTabbableElements = (container: HTMLElement) =>
+  Array.from(
+    container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+  ).filter(
+    (element) =>
+      element.tabIndex >= 0 &&
+      !element.hasAttribute("disabled") &&
+      !element.closest("[inert]"),
+  );
+
+/**
+ * Whether an element is on screen, judged by the carousel item holding it
+ * rather than by the element itself: items are what the carousel scrolls by, so
+ * a button at the far edge of one counts as visible exactly when its item does.
+ */
+const isWithinScrollport = (element: HTMLElement, container: HTMLElement) => {
+  const measured =
+    element.closest<HTMLElement>("[data-carousel-item]") ?? element;
+  const left = getOffsetLeft(measured, container);
+  const { scrollLeft } = container;
+  return (
+    left >= scrollLeft - 1 &&
+    left + measured.offsetWidth <= scrollLeft + container.offsetWidth + 1
+  );
 };
 
 const getLoopTwin = (
@@ -475,7 +529,7 @@ const relocateFocusToLoopTwin = (container: HTMLElement, delta: number) => {
   if (!target) {
     return;
   }
-  focusLoopTwin(target);
+  focusWithoutScrolling(target);
 };
 
 /**
@@ -539,7 +593,7 @@ const teleportTowardsFocus = (
     const copies = Math.round((start - left) / metrics.naturalWidth);
     const twin = getLoopTwin(target, copies);
     if (twin) {
-      focusLoopTwin(twin);
+      focusWithoutScrolling(twin);
     }
     return 0;
   }
@@ -2427,7 +2481,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     const handleFocus = useCallback(
       (event: FocusEvent) => {
         const container = viewportRef.current;
-        const { target } = event;
+        const { target, relatedTarget } = event;
         if (
           container &&
           target instanceof HTMLElement &&
@@ -2457,6 +2511,45 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
             container.scrollLeft = tab.backwards
               ? Math.min(tab.scrollLeft, container.scrollLeft)
               : Math.max(tab.scrollLeft, container.scrollLeft);
+            // Tabbing in from outside lands on whatever comes first in the
+            // DOM, which after any amount of scrolling is somewhere back at the
+            // beginning — and going to fetch it drags the carousel all the way
+            // there. What the user meant was the thing they can see, so the
+            // focus is handed to the first of those instead and nothing moves.
+            // The viewport itself does not count as being inside. Firefox makes
+            // a scrollable box focusable so it can be scrolled with the arrow
+            // keys, which puts a tab stop on the carousel before any of its
+            // contents: coming from there is still coming in from outside, and
+            // treating it otherwise leaves the arrival to fend for itself — the
+            // one browser where tabbing in still went to fetch the first child.
+            const cameFromOutside = !(
+              relatedTarget instanceof Node &&
+              relatedTarget !== container &&
+              container.contains(relatedTarget)
+            );
+            if (cameFromOutside && !isWithinScrollport(target, container)) {
+              const onScreen = getTabbableElements(container).filter(
+                (element) => isWithinScrollport(element, container),
+              );
+              // shift-tabbing arrives at the far end, so it starts from the
+              // last thing on screen rather than the first
+              const candidate = tab.backwards
+                ? onScreen[onScreen.length - 1]
+                : onScreen[0];
+              if (candidate && candidate !== target) {
+                const held = container.scrollLeft;
+                focusWithoutScrolling(candidate);
+                // Firefox goes to fetch the element that first took the focus
+                // after handing us the event rather than before it, so the
+                // position it was told about has to be held for a frame.
+                requestAnimationFrame(() => {
+                  if (Math.abs(container.scrollLeft - held) > 1) {
+                    container.scrollLeft = held;
+                  }
+                });
+                return;
+              }
+            }
             // a looping carousel can bring the element the tab order moved to
             // round to the near side, rather than travelling to where it
             // happens to sit: whole copies cost nothing to cross, so only the

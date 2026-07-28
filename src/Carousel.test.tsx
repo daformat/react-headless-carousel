@@ -1241,26 +1241,91 @@ describe("Carousel", () => {
       expect(Math.abs(delta % NATURAL_WIDTH)).toBe(0);
     });
 
-    it("hands the focus to a copy in reach rather than sweeping back to the start", () => {
+    it("sends a tab entering the carousel to the first thing on screen", () => {
       renderFocusableLoopCarousel();
       const vp = getViewport();
       const items = getItems();
-      // tabbing into the carousel lands on the first thing in the tab order,
-      // which is the first copy of the first child — right at the start of the
-      // content, where the scroll cannot shift back a period to reach it
+      // tabbing in lands on the first thing in the tab order, which after any
+      // amount of scrolling is back at the beginning of the content
       const first = items[0].querySelector("button") as HTMLButtonElement;
-      // less than a copy from the start, so shifting back by one would land
-      // outside the content altogether
       const parked = NATURAL_WIDTH - ITEM_WIDTH;
       vp.scrollLeft = parked;
 
       tabTo(first);
 
-      // the scroll stayed where it was: no sweep back across the content
+      // nothing moved, and the focus is on the first thing the user can see
       expect(vp.scrollLeft).toBe(parked);
-      // and the focus went to the copy of that child which is within reach
+      expect(document.activeElement).not.toBe(first);
+      expect(document.activeElement).toBe(
+        items[parked / ITEM_WIDTH].querySelector("button"),
+      );
+    });
+
+    it("enters from the far end when shift-tabbing in", () => {
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      const parked = NATURAL_WIDTH - ITEM_WIDTH;
+      vp.scrollLeft = parked;
+
+      fireEvent.keyDown(document.activeElement ?? document.body, {
+        key: "Tab",
+        shiftKey: true,
+      });
+      (items[0].querySelector("button") as HTMLButtonElement).focus();
+
+      // the last thing on screen, since that is the end the focus came in from
+      const item = (document.activeElement as HTMLElement).closest(
+        "[data-carousel-item]",
+      ) as HTMLElement;
+      const left = offsetOf(items.indexOf(item));
+      expect(left + ITEM_WIDTH).toBeLessThanOrEqual(parked + VIEWPORT_WIDTH);
+      expect(left + ITEM_WIDTH).toBeGreaterThan(
+        parked + VIEWPORT_WIDTH - ITEM_WIDTH,
+      );
+      expect(vp.scrollLeft).toBe(parked);
+    });
+
+    it("treats a tab arriving from the viewport itself as coming from outside", () => {
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      // Firefox makes a scrollable box focusable so it can be scrolled with the
+      // arrow keys, so tabbing in stops on the carousel before its contents:
+      // the tab after that is the real arrival, and it comes from the viewport
+      const first = items[0].querySelector("button") as HTMLButtonElement;
+      const parked = NATURAL_WIDTH - ITEM_WIDTH;
+      vp.scrollLeft = parked;
+
+      fireEvent.keyDown(vp, { key: "Tab" });
+      fireEvent.focus(first, { relatedTarget: vp });
+
+      // it went to the first thing on screen — which is not the same as the
+      // copy of the arrival that happens to be within reach, so this says
+      // which of the two paths ran
+      expect(vp.scrollLeft).toBe(parked);
+      const firstOnScreen = items[parked / ITEM_WIDTH].querySelector("button");
+      expect(document.activeElement).toBe(firstOnScreen);
+    });
+
+    it("hands the focus to a copy in reach when tabbing on within the carousel", () => {
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      // already inside, so the redirect for arrivals does not apply: this is
+      // the fallback for when the scroll cannot shift a period to reach what
+      // the tab order offers next
+      const inside = items[6].querySelector("button") as HTMLButtonElement;
+      inside.focus();
+      const first = items[0].querySelector("button") as HTMLButtonElement;
+      const parked = NATURAL_WIDTH - ITEM_WIDTH;
+      vp.scrollLeft = parked;
+
+      fireEvent.keyDown(inside, { key: "Tab" });
+      fireEvent.focus(first, { relatedTarget: inside });
+
+      expect(vp.scrollLeft).toBe(parked);
       const active = document.activeElement as HTMLElement;
-      expect(active).not.toBe(first);
       expect(active.textContent).toBe(first.textContent);
       const activeIndex = items.indexOf(
         active.closest("[data-carousel-item]") as HTMLElement,
