@@ -1539,24 +1539,49 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       const resumeHover = () => setPaused("hover", false);
       const pauseFocus = () => setPaused("focus", true);
       const resumeFocus = () => setPaused("focus", false);
-      // The wait starts when the interaction ends, not when it begins: a drag
-      // holds the carousel for as long as the finger is down, and a wheel keeps
-      // pushing the wait back for as long as the scrolling goes on.
+      // The wait starts when the carousel comes to rest, not when the gesture
+      // ends: letting go of a drag hands over to the momentum animation, and
+      // the last flick of a wheel to whatever snapping the browser still has to
+      // do, so what the user let go of goes on moving for a while yet. Picking
+      // up before then takes the carousel away mid-glide, which is the very
+      // thing the pause is for.
       let resumeTimeout: MaybeUndefined<ReturnType<typeof setTimeout>>;
+      /** the gesture is over, and we are waiting on where it leaves us */
+      let isSettling = false;
       const holdForInteraction = () => {
         clearTimeout(resumeTimeout);
+        isSettling = false;
         setPaused("interaction", true);
       };
       const releaseAfterInteraction = () => {
         clearTimeout(resumeTimeout);
-        resumeTimeout = setTimeout(
-          () => setPaused("interaction", false),
-          autoplayPauseOnInteraction || AUTOPLAY_RESUME_DELAY,
-        );
+        isSettling = true;
+        resumeTimeout = setTimeout(() => {
+          // Still going under its own steam: a rubber band springing back, or a
+          // wheel gesture that has not timed out yet. Neither makes scroll
+          // events of its own to wait on, so the wait simply starts again.
+          if (isBusy()) {
+            releaseAfterInteraction();
+            return;
+          }
+          isSettling = false;
+          setPaused("interaction", false);
+        }, autoplayPauseOnInteraction || AUTOPLAY_RESUME_DELAY);
       };
       const handleInteraction = () => {
         holdForInteraction();
         releaseAfterInteraction();
+      };
+      /**
+       * Momentum, snapping and the loop's own corrections all arrive as scrolls
+       * after the user has finished. Each one puts the wait back, so what the
+       * countdown runs from is the position the carousel settles on rather than
+       * the moment the hand left it.
+       */
+      const handleInteractionScroll = () => {
+        if (isSettling && !state.isPointerDown) {
+          releaseAfterInteraction();
+        }
       };
       const handleVisibility = () =>
         setPaused("hidden", document.visibilityState === "hidden");
@@ -1583,6 +1608,9 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           passive: true,
         });
         viewport.addEventListener("pointerdown", holdForInteraction);
+        viewport.addEventListener("scroll", handleInteractionScroll, {
+          passive: true,
+        });
         document.addEventListener("pointerup", releaseAfterInteraction);
         document.addEventListener("pointercancel", releaseAfterInteraction);
       }
@@ -1598,6 +1626,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         viewport.removeEventListener("focusout", resumeFocus);
         viewport.removeEventListener("wheel", handleInteraction);
         viewport.removeEventListener("pointerdown", holdForInteraction);
+        viewport.removeEventListener("scroll", handleInteractionScroll);
         document.removeEventListener("pointerup", releaseAfterInteraction);
         document.removeEventListener("pointercancel", releaseAfterInteraction);
         document.removeEventListener("visibilitychange", handleVisibility);

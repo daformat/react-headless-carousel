@@ -1604,6 +1604,44 @@ describe("Carousel", () => {
       expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
     });
 
+    it("starts that clock when the scrolling settles, not when it stops being pushed", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+
+      fireEvent.wheel(vp, { deltaX: 120 });
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+
+      // the carousel is still on its way to wherever the wheel sent it: each
+      // scroll it makes on the way there puts the wait back
+      vi.advanceTimersByTime(1000);
+      fireEvent.scroll(vp);
+      vi.advanceTimersByTime(1000);
+      fireEvent.scroll(vp);
+      // two seconds after the wheel, and the wait is only a second and a half
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+
+      vi.advanceTimersByTime(1499);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+      vi.advanceTimersByTime(1);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+    });
+
+    it("waits for the momentum of a flick to run out, not just the finger", () => {
+      vi.useFakeTimers();
+      const { vp } = renderAutoplay({ mode: "item", interval: 1000 });
+
+      fireEvent.pointerDown(vp, { pointerType: "touch", pointerId: 1 });
+      fireEvent.pointerUp(document, { pointerType: "touch", pointerId: 1 });
+
+      // the flick is still gliding well after the finger has gone
+      vi.advanceTimersByTime(1400);
+      fireEvent.scroll(vp);
+      vi.advanceTimersByTime(1400);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("paused");
+      vi.advanceTimersByTime(100);
+      expect(getRoot()?.dataset.carouselAutoplay).toBe("playing");
+    });
+
     it("waits as long as it is told to", () => {
       vi.useFakeTimers();
       const { vp } = renderAutoplay({

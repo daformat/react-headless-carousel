@@ -130,8 +130,9 @@ scroll-the-minimum-needed treatment.
 ```
 
 Hovering and focusing describe a mouse and a keyboard. A touch has neither, so `pauseOnInteraction` is what stops the
-carousel taking an item away from someone reading it on a phone: scrolling or dragging holds it, and it picks up again
-once they have left it alone: a drag for as long as the finger is down, a scroll for as long as it keeps going.
+carousel taking an item away from someone reading it on a phone. Scrolling or dragging holds it, and the wait starts
+once the carousel has come to rest: the momentum, the snapping and the loop's own corrections all count, so it runs
+from the position the carousel settles on rather than from the moment the hand left it.
 
 | Option               | Type                               | Default      | Description                                                                                                                                           |
 | -------------------- | ---------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -143,7 +144,7 @@ once they have left it alone: a drag for as long as the finger is down, a scroll
 | `pauseAtEnd`         | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with a literal `loop`.                                    |
 | `pauseOnHover`       | `boolean`                          | `true`       | Pause while the pointer is over the carousel.                                                                                                         |
 | `pauseOnFocus`       | `boolean`                          | `true`       | Pause while the focus is anywhere inside the carousel, items included.                                                                                |
-| `pauseOnInteraction` | `number \| false`                  | `1500`       | Milliseconds to wait after the user has scrolled or dragged before picking up again. `false` carries on regardless.                                   |
+| `pauseOnInteraction` | `number \| false`                  | `1500`       | Milliseconds to wait after a scroll or a drag has settled before picking up again. `false` carries on regardless.                                     |
 
 The options that do not apply to a given configuration are compile errors rather than settings that quietly do nothing,
 and the type carries the reason: hovering `atEnd` on a looping carousel says it does not apply there, since a looping
