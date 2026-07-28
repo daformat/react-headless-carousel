@@ -381,8 +381,15 @@ const recenterLoopScroll = (container: HTMLElement) => {
   return container.scrollLeft - scrollLeft;
 };
 
+/** What one turn of the autoplay does */
+type CarouselAutoplayStepMode = "item" | "page";
+type CarouselAutoplayMode = "continuous" | CarouselAutoplayStepMode;
+type CarouselAutoplayDirection = "forwards" | "backwards";
+/** What to do once a carousel that does not loop runs out of content */
+type CarouselAutoplayAtEnd = "rewind" | "reverse" | "stop";
+
 type CarouselAutoplayBase = {
-  direction?: "forwards" | "backwards";
+  direction?: CarouselAutoplayDirection;
   /** Pause while the pointer is over the carousel. On by default */
   pauseOnHover?: boolean;
   /** Pause while the focus is anywhere inside the carousel. On by default */
@@ -395,13 +402,13 @@ type CarouselAutoplayBase = {
  * there is never an end to handle — see CarouselRootProps, which is what decides
  * whether these are on the table.
  */
-type CarouselAutoplayAtEnd = {
+type CarouselAutoplayEndOptions = {
   /**
    * `rewind` goes back to the end it started from and carries on, `reverse`
    * turns around and plays back the way it came, `stop` leaves it there.
    * Rewinds by default.
    */
-  atEnd?: "rewind" | "reverse" | "stop";
+  atEnd?: CarouselAutoplayAtEnd;
 };
 
 /**
@@ -433,7 +440,7 @@ type CarouselAutoplayOptions<CanEnd extends boolean = false> =
       speed?: number;
       interval?: NoInterval;
     } & (CanEnd extends true
-        ? CarouselAutoplayAtEnd & {
+        ? CarouselAutoplayEndOptions & {
             /**
              * How long to sit still on reaching the end — or the start, on the
              * way back — before `atEnd` turns it around or takes it home, in
@@ -447,26 +454,34 @@ type CarouselAutoplayOptions<CanEnd extends boolean = false> =
        * Steps to the next item, or to the next viewport worth of them — a page
        * being the same move the prev / next buttons make. Items by default.
        */
-      mode?: "item" | "page";
+      mode?: CarouselAutoplayStepMode;
       /** How long to wait between steps, in milliseconds. Defaults to 3000 */
       interval?: number;
       speed?: NoSpeed;
       pauseAtEnd?: NoPauseAtEndHere;
-    } & (CanEnd extends true ? CarouselAutoplayAtEnd : { atEnd?: NoAtEnd }));
+    } & (CanEnd extends true
+        ? CarouselAutoplayEndOptions
+        : { atEnd?: NoAtEnd }));
 
 /** Every autoplay option, whichever way the props narrowed them */
 type ResolvedAutoplayOptions = CarouselAutoplayBase &
-  CarouselAutoplayAtEnd & {
-    mode?: "continuous" | "item" | "page";
+  CarouselAutoplayEndOptions & {
+    mode?: CarouselAutoplayMode;
     speed?: number;
     interval?: number;
     pauseAtEnd?: number;
   };
 
+/**
+ * Inset from the leading and trailing edges of the viewport, used when scrolling
+ * items into view. Either a fixed pair or a function given the root element.
+ */
+type CarouselBoundaryOffset =
+  | { x: number; y: number }
+  | ((root: HTMLElement) => { x: number; y: number });
+
 type CarouselRootBaseProps = {
-  boundaryOffset?:
-    | { x: number; y: number }
-    | ((root: HTMLElement) => { x: number; y: number });
+  boundaryOffset?: CarouselBoundaryOffset;
 } & ComponentPropsWithoutRef<"div">;
 
 /**
@@ -2774,6 +2789,31 @@ const measurePadding = (
   element.style.setProperty(CSS_VARS[blockEnd], paddingBlockEnd);
 };
 
+/**
+ * The types, exported flat. These are the canonical names — the namespace
+ * further down is sugar over this list, not a separate API. Anything that
+ * cannot see through a namespace (isolated declarations, some `.d.ts`
+ * bundlers) still has a way to name every prop type.
+ */
+export type {
+  CarouselAutoplayAtEnd,
+  CarouselAutoplayDirection,
+  CarouselAutoplayMode,
+  CarouselAutoplayOptions,
+  CarouselAutoplayStepMode,
+  CarouselBoundaryOffset,
+  CarouselContentProps,
+  CarouselContext,
+  CarouselItemProps,
+  CarouselNextPageProps,
+  CarouselPrevPageProps,
+  CarouselRootProps,
+  CarouselViewportProps,
+};
+
+// the namespace below merges its types onto this object, which the import
+// plugin reads as a second export of the same name
+// eslint-disable-next-line import/export
 export const Carousel = {
   Root: CarouselRoot,
   Viewport: CarouselViewport,
@@ -2785,3 +2825,38 @@ export const Carousel = {
   defaultBoundaryOffset,
   CSS_VARS,
 };
+
+/**
+ * The types that go with the components, kept under the same name so that
+ * anything built on top of the carousel can reach them without a second import:
+ * `Carousel.AutoplayMode`, `Carousel.RootProps`, and so on. Types only — this
+ * merges with the object above rather than adding anything to it.
+ */
+// Merging types onto the component object is the one thing a namespace is still
+// the right tool for: there is no module syntax that puts `Carousel.RootProps`
+// next to `Carousel.Root`. Nothing is emitted for it.
+// eslint-disable-next-line @typescript-eslint/no-namespace, import/export
+export declare namespace Carousel {
+  export type RootProps = CarouselRootProps;
+  export type ViewportProps = CarouselViewportProps;
+  export type ContentProps = CarouselContentProps;
+  export type ItemProps = CarouselItemProps;
+  export type PrevPageProps = CarouselPrevPageProps;
+  export type NextPageProps = CarouselNextPageProps;
+
+  /**
+   * `CanEnd` says whether the carousel is one that can run out of content,
+   * which is the only time the `atEnd` options are on offer — a looping
+   * carousel never reaches an end. Follows `loop`, so it is `false` by default.
+   */
+  export type AutoplayOptions<CanEnd extends boolean = false> =
+    CarouselAutoplayOptions<CanEnd>;
+  export type AutoplayMode = CarouselAutoplayMode;
+  export type AutoplayStepMode = CarouselAutoplayStepMode;
+  export type AutoplayDirection = CarouselAutoplayDirection;
+  export type AutoplayAtEnd = CarouselAutoplayAtEnd;
+
+  export type BoundaryOffset = CarouselBoundaryOffset;
+  /** What `Carousel.useCarouselContext()` hands back */
+  export type Context = CarouselContext;
+}

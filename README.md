@@ -278,3 +278,78 @@ Carousel.CSS_VARS.fadeOffsetBackwards; // "--carousel-fade-offset-backwards"
 Carousel.CSS_VARS.overscrollTranslateX; // "--carousel-overscroll-translate-x"
 Carousel.CSS_VARS.scrollMarginInline; // "--carousel-scroll-margin-inline"
 ```
+
+---
+
+## Types
+
+Every public type is exported twice, under the same definition — pick whichever reads better where you are. Flat named
+exports:
+
+```ts
+import type {
+  CarouselAutoplayOptions,
+  CarouselRootProps,
+} from "@daformat/react-headless-carousel";
+```
+
+Or grouped on the `Carousel` object, next to the components they belong to:
+
+```tsx
+import { Carousel } from "@daformat/react-headless-carousel";
+
+const [mode, setMode] = useState<Carousel.AutoplayMode>("item");
+```
+
+| Flat name                         | On `Carousel`                      | Description                                                                        |
+| --------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
+| `CarouselRootProps`               | `Carousel.RootProps`               | Props of `Carousel.Root`, including the `loop`/`autoplay` pairing described below. |
+| `CarouselViewportProps`           | `Carousel.ViewportProps`           | Props of `Carousel.Viewport`.                                                      |
+| `CarouselContentProps`            | `Carousel.ContentProps`            | Props of `Carousel.Content`.                                                       |
+| `CarouselItemProps`               | `Carousel.ItemProps`               | Props of `Carousel.Item`.                                                          |
+| `CarouselNextPageProps`           | `Carousel.NextPageProps`           | Props of `Carousel.NextPage`.                                                      |
+| `CarouselPrevPageProps`           | `Carousel.PrevPageProps`           | Props of `Carousel.PrevPage`.                                                      |
+| `CarouselAutoplayOptions<CanEnd>` | `Carousel.AutoplayOptions<CanEnd>` | The object form of the `autoplay` prop. See the note on `CanEnd` below.            |
+| `CarouselAutoplayMode`            | `Carousel.AutoplayMode`            | `"continuous" \| "item" \| "page"`.                                                |
+| `CarouselAutoplayStepMode`        | `Carousel.AutoplayStepMode`        | Just the stepping modes, `"item" \| "page"` — the ones that take an `interval`.    |
+| `CarouselAutoplayDirection`       | `Carousel.AutoplayDirection`       | `"forwards" \| "backwards"`.                                                       |
+| `CarouselAutoplayAtEnd`           | `Carousel.AutoplayAtEnd`           | `"rewind" \| "reverse" \| "stop"`.                                                 |
+| `CarouselBoundaryOffset`          | `Carousel.BoundaryOffset`          | The `boundaryOffset` prop: a point, or a function returning one.                   |
+| `CarouselContext`                 | `Carousel.Context`                 | The value returned by `Carousel.useCarouselContext`.                               |
+
+### `AutoplayOptions` and the `CanEnd` parameter
+
+`AutoplayOptions` takes a boolean type parameter saying whether the carousel is one that can run out of content. A
+looping carousel never reaches an end, so `atEnd` and `pauseAtEnd` are only part of the type when `CanEnd` is `true`.
+Writing the prop inline needs none of this — `Carousel.Root` picks the right one from `loop`. It only matters when you
+declare the options separately:
+
+```ts
+// the bare form is the narrow one: no end options, for a carousel that loops
+const looping: CarouselAutoplayOptions = { mode: "item", interval: 2000 };
+
+// a carousel that does not loop can reach an end, so pass true to get at them
+const finite: CarouselAutoplayOptions<true> = {
+  mode: "continuous",
+  speed: 60,
+  pauseAtEnd: 1000,
+  atEnd: "reverse",
+};
+```
+
+Note that `CanEnd` defaults to `false` while `loop` defaults to `false` too — so a variable typed as a bare
+`CarouselAutoplayOptions` is the wrong shape for a default (non-looping) carousel, and will reject the `atEnd` it is
+entitled to. The default is deliberately the restrictive one; reach for `<true>` whenever `loop` is off or unknown.
+
+The unavailable options are typed as the reason they are unavailable, so the compiler quotes it back at you instead of
+saying "not assignable to type 'undefined'":
+
+```tsx
+<Carousel.Root loop autoplay={{ mode: "item", atEnd: "rewind" }} />
+//                                            ^ Type '"rewind"' is not assignable to type
+//                                              '"`atEnd` does not apply with loop — a looping
+//                                                carousel never runs out of content"'
+```
+
+The same trick covers `speed` on a stepping mode, `interval` on a continuous one, and `pauseAtEnd` outside of
+`mode: "continuous"`.
