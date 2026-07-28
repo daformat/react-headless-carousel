@@ -1081,6 +1081,205 @@ describe("Carousel", () => {
       expect(vp.style.scrollSnapType).toBe("none");
     });
 
+    /** A looping carousel whose items hold something tabbing can land on */
+    const renderFocusableLoopCarousel = () =>
+      render(
+        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop>
+          <Carousel.Viewport>
+            <Carousel.Content>
+              {Array.from({ length: CHILDREN_COUNT }, (_, i) => (
+                <Carousel.Item key={i}>
+                  <button type="button">Item {i}</button>
+                </Carousel.Item>
+              ))}
+            </Carousel.Content>
+          </Carousel.Viewport>
+        </Carousel.Root>,
+      );
+
+    /**
+     * Which engine the carousel thinks it is running in. Chromium is the one
+     * that re-snaps whatever a cut-short scroll leaves it holding.
+     */
+    const asEngine = (engine: "chromium" | "other") => {
+      Object.defineProperty(navigator, "userAgentData", {
+        value:
+          engine === "chromium"
+            ? { brands: [{ brand: "Chromium", version: "140" }] }
+            : undefined,
+        configurable: true,
+      });
+    };
+
+    /** Where an item sits in the content, per the stubbed layout */
+    const offsetOf = (index: number) => index * ITEM_WIDTH;
+
+    /** Moves the focus the way a Tab press does: the key, then the focus */
+    const tabTo = (element: HTMLElement) => {
+      // the press comes from wherever the focus currently is, which is how the
+      // carousel tells a tab apart from anything else moving the focus
+      fireEvent.keyDown(document.activeElement ?? element, { key: "Tab" });
+      element.focus();
+    };
+
+    it("carries a tab's scroll across a wrap instead of stranding it", () => {
+      asEngine("chromium");
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      const originals = getOriginalItems();
+
+      // a tab sets a scroll going, and the frame it waits on never runs here,
+      // so it is still outstanding when the wrap arrives
+      vp.scrollLeft = offsetOf(items.indexOf(originals[0]));
+      tabTo(
+        items[items.indexOf(originals[0]) + 1].querySelector(
+          "button",
+        ) as HTMLButtonElement,
+      );
+
+      // the wrap moves everything along by whole copies
+      const scrollTo = vi.spyOn(vp, "scrollTo");
+      const brink = vp.scrollWidth - vp.clientWidth - 10;
+      vp.scrollLeft = brink;
+      fireEvent.scroll(vp);
+      expect(vp.scrollLeft).not.toBe(brink);
+
+      // the teleport is instant, and the scroll that was still running has been
+      // sent on again — to the same place, a copy along — rather than left
+      // stranded wherever the wrap happened to cut it short
+      const behaviours = scrollTo.mock.calls.map(
+        ([options]) => (options as ScrollToOptions)?.behavior,
+      );
+      expect(behaviours).toContain("instant");
+      expect(behaviours).toContain("smooth");
+    });
+
+    it("carries it across for the other engines too", () => {
+      // a scroll cut short by the wrap lands somewhere that is no snap point in
+      // any engine; each corrects for that in its own way, and none of them
+      // wants the journey abandoned half way
+      asEngine("other");
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      const originals = getOriginalItems();
+
+      vp.scrollLeft = offsetOf(items.indexOf(originals[0]));
+      tabTo(
+        items[items.indexOf(originals[0]) + 1].querySelector(
+          "button",
+        ) as HTMLButtonElement,
+      );
+
+      const scrollTo = vi.spyOn(vp, "scrollTo");
+      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      fireEvent.scroll(vp);
+
+      const behaviours = scrollTo.mock.calls.map(
+        ([options]) => (options as ScrollToOptions)?.behavior,
+      );
+      expect(behaviours).toContain("instant");
+      expect(behaviours).toContain("smooth");
+    });
+
+    it("leaves a wheel scroll's wrap alone", () => {
+      vi.useFakeTimers();
+      renderLoopCarousel({ scrollSnapType: "x mandatory" });
+      const vp = getViewport();
+
+      // no tabbing involved: the wrap does what it has always done, and nothing
+      // re-issues a scroll behind it
+      fireEvent.wheel(vp, { deltaX: 120 });
+      const brink = vp.scrollWidth - vp.clientWidth - 10;
+      vp.scrollLeft = brink;
+      fireEvent.scroll(vp);
+
+      const delta = vp.scrollLeft - brink;
+      expect(delta).not.toBe(0);
+      // a whole number of copies, exactly as before
+      expect(Math.abs(delta % NATURAL_WIDTH)).toBe(0);
+    });
+
+    it("hands the focus to a copy in reach rather than sweeping back to the start", () => {
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      // tabbing into the carousel lands on the first thing in the tab order,
+      // which is the first copy of the first child — right at the start of the
+      // content, where the scroll cannot shift back a period to reach it
+      const first = items[0].querySelector("button") as HTMLButtonElement;
+      // less than a copy from the start, so shifting back by one would land
+      // outside the content altogether
+      const parked = NATURAL_WIDTH - ITEM_WIDTH;
+      vp.scrollLeft = parked;
+
+      tabTo(first);
+
+      // the scroll stayed where it was: no sweep back across the content
+      expect(vp.scrollLeft).toBe(parked);
+      // and the focus went to the copy of that child which is within reach
+      const active = document.activeElement as HTMLElement;
+      expect(active).not.toBe(first);
+      expect(active.textContent).toBe(first.textContent);
+      const activeIndex = items.indexOf(
+        active.closest("[data-carousel-item]") as HTMLElement,
+      );
+      expect(activeIndex % CHILDREN_COUNT).toBe(0);
+      expect(activeIndex).toBeGreaterThan(0);
+    });
+
+    it("crosses whole copies to reach what tabbing moved to, showing none of it", () => {
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      const originals = getOriginalItems();
+      const lastOriginal = originals[originals.length - 1];
+      const next = items[items.indexOf(lastOriginal) + 1];
+      expect(next.hasAttribute("data-loop-clone")).toBe(true);
+
+      // the focus is on the last of the children while the carousel has since
+      // settled a copy further along — so what tabbing offers next sits behind
+      // what is on screen, and reaching it the direct way means scrolling back
+      (lastOriginal.querySelector("button") as HTMLButtonElement).focus();
+      const parked =
+        offsetOf(items.indexOf(lastOriginal)) + NATURAL_WIDTH - ITEM_WIDTH;
+      vp.scrollLeft = parked;
+
+      tabTo(next.querySelector("button") as HTMLButtonElement);
+
+      // it moved by whole copies only: every one of them shows the same pixels,
+      // so as far as the eye is concerned the carousel never moved at all
+      const delta = vp.scrollLeft - parked;
+      expect(delta).not.toBe(0);
+      expect(Math.abs(delta % NATURAL_WIDTH)).toBe(0);
+      // and what tabbing moved to is on screen at the end of it
+      const left = offsetOf(items.indexOf(next));
+      expect(left).toBeGreaterThanOrEqual(vp.scrollLeft);
+      expect(left + ITEM_WIDTH).toBeLessThanOrEqual(
+        vp.scrollLeft + VIEWPORT_WIDTH,
+      );
+    });
+
+    it("just scrolls when what tabbing moved to is only a little ahead", () => {
+      renderFocusableLoopCarousel();
+      const vp = getViewport();
+      const items = getItems();
+      const originals = getOriginalItems();
+      const from = originals[0];
+      const next = items[items.indexOf(from) + 1];
+
+      (from.querySelector("button") as HTMLButtonElement).focus();
+      const parked = offsetOf(items.indexOf(from));
+      vp.scrollLeft = parked;
+
+      tabTo(next.querySelector("button") as HTMLButtonElement);
+
+      // the next item along is already all but on screen: nothing to teleport
+      // across, and nothing that would read as a jump
+      expect(Math.abs(vp.scrollLeft - parked)).toBeLessThanOrEqual(ITEM_WIDTH);
+    });
+
     it("carries the focus along when it sits on a copy being teleported", () => {
       render(
         <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop>
@@ -1120,31 +1319,27 @@ describe("Carousel", () => {
       expect(document.activeElement).toBe(twin.querySelector("button"));
     });
 
-    it("leaves the focus alone when it sits on one of the children", () => {
-      render(
-        <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop>
-          <Carousel.Viewport>
-            <Carousel.Content>
-              {Array.from({ length: CHILDREN_COUNT }, (_, i) => (
-                <Carousel.Item key={i}>
-                  <button type="button">Item {i}</button>
-                </Carousel.Item>
-              ))}
-            </Carousel.Content>
-          </Carousel.Viewport>
-        </Carousel.Root>,
-      );
+    it("follows the focus off a child too, so the ring never goes missing", () => {
+      renderFocusableLoopCarousel();
       const vp = getViewport();
-      // the children themselves are what assistive tech can see: the focus
-      // stays on one rather than being moved into a copy that it cannot
-      const original = getOriginalItems()[0] as HTMLElement;
+      // the focus sits on one of the children rather than a copy: a teleport
+      // carries it off screen just the same, and the focus ring with it
+      const original = getOriginalItems()[0];
       const button = original.querySelector("button") as HTMLButtonElement;
       button.focus();
 
-      vp.scrollLeft = vp.scrollWidth - vp.clientWidth - 10;
+      const from = vp.scrollWidth - vp.clientWidth - 10;
+      vp.scrollLeft = from;
       fireEvent.scroll(vp);
 
-      expect(document.activeElement).toBe(button);
+      const delta = vp.scrollLeft - from;
+      expect(delta).not.toBe(0);
+      // the focus moved with the pixels: same child, the copy of it that is now
+      // standing where the user was looking
+      const active = document.activeElement as HTMLElement;
+      expect(active).not.toBe(button);
+      expect(active.tagName).toBe("BUTTON");
+      expect(active.textContent).toBe(button.textContent);
     });
 
     it("stays where it is when a click starts no momentum", () => {

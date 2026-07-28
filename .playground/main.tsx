@@ -11,6 +11,7 @@ const Demo = ({
   width,
   autoplay,
   align = "start",
+  focusable = false,
 }: {
   label: string;
   count: number;
@@ -19,6 +20,7 @@ const Demo = ({
   width?: number;
   autoplay?: boolean | Record<string, unknown>;
   align?: "start" | "center" | "end";
+  focusable?: boolean;
 }) => {
   const [info, setInfo] = useState("");
   useEffect(() => {
@@ -63,7 +65,13 @@ const Demo = ({
                   width: width ?? 160,
                 }}
               >
-                {i}
+                {focusable ? (
+                  <button type="button" id={`btn-${label}-${i}`}>
+                    {i}
+                  </button>
+                ) : (
+                  i
+                )}
               </Carousel.Item>
             ))}
           </Carousel.Content>
@@ -91,6 +99,8 @@ const Toggle = () => {
 createRoot(document.getElementById("root")!).render(
   <>
     <Toggle />
+    <Demo label="focus-snap" count={6} loop focusable snap="x mandatory" />
+    <Demo label="focus-nosnap" count={6} loop focusable />
     <Demo label="loop-snap" count={6} loop snap="x mandatory" />
     <Demo label="loop-nosnap" count={6} loop />
     <Demo label="loop-few" count={2} loop snap="x mandatory" />
