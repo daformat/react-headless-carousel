@@ -8,6 +8,7 @@ import {
   forwardRef,
   isValidElement,
   type ReactElement,
+  type RefAttributes,
   type RefObject,
   useCallback,
   useContext,
@@ -489,37 +490,34 @@ type CarouselRootBaseProps = {
  * never runs out of content, so the `atEnd` options would sit there doing
  * nothing. Rather than accept them and quietly ignore them, they are only part
  * of the type when the carousel can actually reach an end.
+ *
+ * `Loop` follows whatever `loop` is given, so the ruling tracks how much is
+ * known about it. A literal settles the question either way. A `boolean` that
+ * only resolves at runtime leaves it open, and the conditional below hands back
+ * both shapes: the `atEnd` options do their job on the runs that come out
+ * `false` and sit inert on the runs that do not, which is a good deal better
+ * than a wrapper being unable to pass its own `loop` prop straight through.
+ *
+ * Defaults to `boolean` when named directly — `Carousel.RootProps` on its own
+ * describes a carousel that could be looping or not, the same set it always
+ * described. `Carousel.Root` defaults it to `false` instead, matching the
+ * carousel you get when you leave `loop` off.
  */
-type CarouselRootProps =
-  | (CarouselRootBaseProps & {
-      /** Off by default: the carousel runs out of content at either end */
-      loop?: false;
-      /**
-       * Scrolls the carousel on its own. `true` steps to the next item every
-       * three seconds; pass an object to choose how and how fast, and what to
-       * do once it runs out of content.
-       */
-      autoplay?: boolean | CarouselAutoplayOptions<true>;
-    })
-  | (CarouselRootBaseProps & {
-      loop: true;
-      /**
-       * Scrolls the carousel on its own. `true` steps to the next item every
-       * three seconds; pass an object to choose how and how fast.
-       */
-      autoplay?: boolean | CarouselAutoplayOptions;
-    })
-  | (CarouselRootBaseProps & {
-      /**
-       * Looping decided at runtime. The `atEnd` options are off the table: this
-       * carousel may well never reach an end. Narrow `loop` to a literal to get
-       * at them.
-       */
-      loop: boolean;
-      autoplay?: boolean | CarouselAutoplayOptions;
-    });
+type CarouselRootProps<Loop extends boolean = boolean> =
+  CarouselRootBaseProps & {
+    /** Off by default: the carousel runs out of content at either end */
+    loop?: Loop;
+    /**
+     * Scrolls the carousel on its own. `true` steps to the next item every
+     * three seconds; pass an object to choose how and how fast, and — unless
+     * `loop` is literally `true` — what to do once it runs out of content.
+     */
+    autoplay?:
+      | boolean
+      | CarouselAutoplayOptions<Loop extends true ? false : true>;
+  };
 
-const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
+const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
   (
     {
       boundaryOffset = defaultBoundaryOffset,
@@ -1356,7 +1354,20 @@ const CarouselRoot = forwardRef<HTMLDivElement, CarouselRootProps>(
   },
 );
 
-CarouselRoot.displayName = "Carousel.Root";
+CarouselRootImpl.displayName = "Carousel.Root";
+
+/**
+ * `forwardRef` hands back a plain component, which has nowhere to put the type
+ * argument that `loop` needs to infer into, so the signature is restated here.
+ * Nothing about the component changes — this is the same object, described in
+ * the one way that lets `loop` decide which autoplay options come with it.
+ *
+ * `Loop` defaults to `false` rather than to the type's own `boolean`, so that
+ * leaving `loop` off gets the carousel that can reach an end, `atEnd` and all.
+ */
+const CarouselRoot = CarouselRootImpl as (<Loop extends boolean = false>(
+  props: CarouselRootProps<Loop> & RefAttributes<HTMLDivElement>,
+) => ReactElement) & { displayName?: string };
 
 type CarouselViewportBaseProps = ComponentPropsWithoutRef<"div"> & {
   scrollSnapType?: CSSProperties["scrollSnapType"];
@@ -2837,7 +2848,13 @@ export const Carousel = {
 // next to `Carousel.Root`. Nothing is emitted for it.
 // eslint-disable-next-line @typescript-eslint/no-namespace, import/export
 export declare namespace Carousel {
-  export type RootProps = CarouselRootProps;
+  /**
+   * `Loop` says whether the carousel loops, which is what decides the autoplay
+   * options that come with it. Left off, it covers either kind — the same set
+   * of props the type has always described.
+   */
+  export type RootProps<Loop extends boolean = boolean> =
+    CarouselRootProps<Loop>;
   export type ViewportProps = CarouselViewportProps;
   export type ContentProps = CarouselContentProps;
   export type ItemProps = CarouselItemProps;

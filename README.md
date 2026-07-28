@@ -80,8 +80,13 @@ number of copies whenever it comes close to running out. The position it leaves 
 the jump itself is not visible.
 
 On mount the carousel parks on the first of your actual children, instantly and without a visible scroll. The copies are
-marked `data-loop-clone`, `aria-hidden` and `tabindex="-1"`, so assistive technology and tab order only ever see your
-real children — and when the scroll settles the carousel comes home to them.
+marked `data-loop-clone`, `aria-hidden` and `tabindex="-1"`, so the copied elements themselves are passed over by
+assistive technology and by tabbing — and when the scroll settles the carousel comes home to your real children.
+
+That covers each copy, not what is inside it: a copy holding a link or a button still has that control in the tab
+order, since neither attribute reaches a descendant. Items that hold something focusable will therefore tab through
+the copies too, and a copy on screen stays clickable — which is usually what you want from something the user can
+plainly see, but it does mean tabbing can land inside an `aria-hidden` copy.
 
 > **Looping and snapping are a best-effort pairing.** Every browser drives a wheel scroll towards a snap point it
 > chooses when the gesture starts, and none of them take kindly to the scroll position moving underneath — Chromium
@@ -112,8 +117,8 @@ real children — and when the scroll settles the carousel comes home to them.
 | `direction`    | `"forwards" \| "backwards"`        | `"forwards"` | Which way to go.                                                                                                                                      |
 | `interval`     | `number`                           | `3000`       | Milliseconds between steps. `item` and `page` only.                                                                                                   |
 | `speed`        | `number`                           | `60`         | Pixels per second. `continuous` only.                                                                                                                 |
-| `atEnd`        | `"rewind" \| "reverse" \| "stop"`  | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. Not available with `loop`.              |
-| `pauseAtEnd`   | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with `loop`.                                              |
+| `atEnd`        | `"rewind" \| "reverse" \| "stop"`  | `"rewind"`   | What to do on running out of content: go back to the end it started from, turn around and play back, or stop. Not available with a literal `loop`.    |
+| `pauseAtEnd`   | `number`                           | `0`          | Milliseconds to sit still at each end before `atEnd` takes over. `continuous` only, and not with a literal `loop`.                                    |
 | `pauseOnHover` | `boolean`                          | `true`       | Pause while the pointer is over the carousel.                                                                                                         |
 | `pauseOnFocus` | `boolean`                          | `true`       | Pause while the focus is anywhere inside the carousel, items included.                                                                                |
 
@@ -301,21 +306,33 @@ import { Carousel } from "@daformat/react-headless-carousel";
 const [mode, setMode] = useState<Carousel.AutoplayMode>("item");
 ```
 
-| Flat name                         | On `Carousel`                      | Description                                                                        |
-| --------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
-| `CarouselRootProps`               | `Carousel.RootProps`               | Props of `Carousel.Root`, including the `loop`/`autoplay` pairing described below. |
-| `CarouselViewportProps`           | `Carousel.ViewportProps`           | Props of `Carousel.Viewport`.                                                      |
-| `CarouselContentProps`            | `Carousel.ContentProps`            | Props of `Carousel.Content`.                                                       |
-| `CarouselItemProps`               | `Carousel.ItemProps`               | Props of `Carousel.Item`.                                                          |
-| `CarouselNextPageProps`           | `Carousel.NextPageProps`           | Props of `Carousel.NextPage`.                                                      |
-| `CarouselPrevPageProps`           | `Carousel.PrevPageProps`           | Props of `Carousel.PrevPage`.                                                      |
-| `CarouselAutoplayOptions<CanEnd>` | `Carousel.AutoplayOptions<CanEnd>` | The object form of the `autoplay` prop. See the note on `CanEnd` below.            |
-| `CarouselAutoplayMode`            | `Carousel.AutoplayMode`            | `"continuous" \| "item" \| "page"`.                                                |
-| `CarouselAutoplayStepMode`        | `Carousel.AutoplayStepMode`        | Just the stepping modes, `"item" \| "page"` — the ones that take an `interval`.    |
-| `CarouselAutoplayDirection`       | `Carousel.AutoplayDirection`       | `"forwards" \| "backwards"`.                                                       |
-| `CarouselAutoplayAtEnd`           | `Carousel.AutoplayAtEnd`           | `"rewind" \| "reverse" \| "stop"`.                                                 |
-| `CarouselBoundaryOffset`          | `Carousel.BoundaryOffset`          | The `boundaryOffset` prop: a point, or a function returning one.                   |
-| `CarouselContext`                 | `Carousel.Context`                 | The value returned by `Carousel.useCarouselContext`.                               |
+| Flat name                         | On `Carousel`                      | Description                                                                                                           |
+| --------------------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `CarouselRootProps<Loop>`         | `Carousel.RootProps<Loop>`         | Props of `Carousel.Root`. `Loop` follows the `loop` prop and decides which autoplay options come with it — see below. |
+| `CarouselViewportProps`           | `Carousel.ViewportProps`           | Props of `Carousel.Viewport`.                                                                                         |
+| `CarouselContentProps`            | `Carousel.ContentProps`            | Props of `Carousel.Content`.                                                                                          |
+| `CarouselItemProps`               | `Carousel.ItemProps`               | Props of `Carousel.Item`.                                                                                             |
+| `CarouselNextPageProps`           | `Carousel.NextPageProps`           | Props of `Carousel.NextPage`.                                                                                         |
+| `CarouselPrevPageProps`           | `Carousel.PrevPageProps`           | Props of `Carousel.PrevPage`.                                                                                         |
+| `CarouselAutoplayOptions<CanEnd>` | `Carousel.AutoplayOptions<CanEnd>` | The object form of the `autoplay` prop. See the note on `CanEnd` below.                                               |
+| `CarouselAutoplayMode`            | `Carousel.AutoplayMode`            | `"continuous" \| "item" \| "page"`.                                                                                   |
+| `CarouselAutoplayStepMode`        | `Carousel.AutoplayStepMode`        | Just the stepping modes, `"item" \| "page"` — the ones that take an `interval`.                                       |
+| `CarouselAutoplayDirection`       | `Carousel.AutoplayDirection`       | `"forwards" \| "backwards"`.                                                                                          |
+| `CarouselAutoplayAtEnd`           | `Carousel.AutoplayAtEnd`           | `"rewind" \| "reverse" \| "stop"`.                                                                                    |
+| `CarouselBoundaryOffset`          | `Carousel.BoundaryOffset`          | The `boundaryOffset` prop: a point, or a function returning one.                                                      |
+| `CarouselContext`                 | `Carousel.Context`                 | The value returned by `Carousel.useCarouselContext`.                                                                  |
+
+Both `RootProps` and `AutoplayOptions` take a boolean type parameter about looping, and the two default in opposite
+directions on purpose — worth knowing before you name either type yourself:
+
+| Written as                      | Parameter is | Which autoplay options                          |
+| ------------------------------- | ------------ | ----------------------------------------------- |
+| `<Carousel.Root>` with no props | `false`      | the full set — the carousel can reach an end    |
+| `CarouselRootProps`             | `boolean`    | both shapes, for a `loop` only known at runtime |
+| `CarouselAutoplayOptions`       | `false`      | no end options, for a carousel that loops       |
+
+So `Carousel.Root` on its own gives you `atEnd`, while a bare `CarouselRootProps` describes a carousel that may or may
+not loop, and a bare `CarouselAutoplayOptions` is the narrowest of the three.
 
 ### `AutoplayOptions` and the `CanEnd` parameter
 
@@ -339,7 +356,25 @@ const finite: CarouselAutoplayOptions<true> = {
 
 Note that `CanEnd` defaults to `false` while `loop` defaults to `false` too — so a variable typed as a bare
 `CarouselAutoplayOptions` is the wrong shape for a default (non-looping) carousel, and will reject the `atEnd` it is
-entitled to. The default is deliberately the restrictive one; reach for `<true>` whenever `loop` is off or unknown.
+entitled to. The default is deliberately the restrictive one; reach for `<true>` whenever `loop` is off.
+
+When `loop` is only known at runtime, pass `boolean` and get both shapes at once. This is what a wrapper component
+wants — it can take a `loop` prop and hand it to `Carousel.Root` alongside the autoplay options, without having to
+split into a looping and a non-looping branch or reach for a cast:
+
+```tsx
+const Gallery = ({
+  loop,
+  autoplay,
+}: {
+  loop: boolean;
+  autoplay?: boolean | CarouselAutoplayOptions<boolean>;
+}) => (
+  <Carousel.Root loop={loop} autoplay={autoplay}>
+    ...
+  </Carousel.Root>
+);
+```
 
 The unavailable options are typed as the reason they are unavailable, so the compiler quotes it back at you instead of
 saying "not assignable to type 'undefined'":
@@ -353,3 +388,7 @@ saying "not assignable to type 'undefined'":
 
 The same trick covers `speed` on a stepping mode, `interval` on a continuous one, and `pauseAtEnd` outside of
 `mode: "continuous"`.
+
+This ruling needs to know whether the carousel loops, so it only applies when `loop` is a literal. Given a `loop` that
+resolves at runtime, `atEnd` and `pauseAtEnd` stay available: they do their job on the runs that come out non-looping,
+and sit inert on the runs that do not.
