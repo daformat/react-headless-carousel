@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.2.0
+
+### Minor Changes
+
+- e025dbc: (feat): Support paging modes `page` (default), `item` and `viewport`; Improve prefers-reduced-motion support and add prop to opt out
+
 ## 1.1.3
 
 ### Patch Changes
