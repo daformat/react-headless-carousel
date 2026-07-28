@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.1.1
+
+### Patch Changes
+
+- bdd2bfb: Add `autoplay.pauseOnInteraction`, export the public types, and make tabbing through a looping carousel visually continuous.
+
 ## 1.1.0
 
 ### Minor Changes
