@@ -2,13 +2,19 @@
   "name": "@daformat/react-headless-carousel",
   "version": "1.1.2",
   "license": "Zero-Clause BSD",
-  "description": "A react headless carousel component, with no dependencies, supporting drag to scroll, inertia, rubber-banding, snapping and more",
+  "description": "A react headless carousel component, with no dependencies, supporting drag to scroll, inertia, rubber-banding, snapping, looping, autoplay and more",
   "keywords": [
     "carousel",
     "react",
     "headless",
     "carousel-component",
-    "react-component"
+    "react-component",
+    "loop",
+    "autoplay",
+    "drag-to-scroll",
+    "inertia",
+    "rubber-banding",
+    "snapping"
   ],
   "homepage": "https://github.com/daformat/react-headless-carousel",
   "bugs": {
