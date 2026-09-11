@@ -1224,7 +1224,13 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
             Math.min(restingPosition(item), maxScroll),
           );
           const distance = landing - scrollLeft;
-          const threshold = item.offsetWidth * MIN_AUTOPLAY_STEP;
+          // A short final move still reveals content. Do not rewind before
+          // reaching the boundary when less than half an item remains.
+          const reachesEnd =
+            direction === "forwards" ? landing === maxScroll : landing === 0;
+          const threshold = reachesEnd
+            ? 1
+            : item.offsetWidth * MIN_AUTOPLAY_STEP;
           return direction === "forwards"
             ? distance > threshold
             : distance < -threshold;
