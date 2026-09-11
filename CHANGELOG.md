@@ -1,5 +1,12 @@
 # react-headless-carousel
 
+## 1.2.1
+
+### Patch Changes
+
+- a1d4600: fix: Let autoplay take a short final step to the scroll boundary instead of rewinding early when less than half an item remains
+- (fix): Let autoplay take a short final step to the scroll boundary instead of rewinding early when less than half an item remains
+
 ## 1.2.0
 
 ### Minor Changes
