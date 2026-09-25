@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.2.3
+
+### Patch Changes
+
+- 6e836fa: fix: Prevent native scrolling when the content fits
+
 ## 1.2.2
 
 ### Patch Changes
