@@ -102,7 +102,13 @@ type ScrollState = {
     y: number;
   }>;
   mouseDirection: number;
-  lastPointerType: PointerEvent["pointerType"] | "";
+  /**
+   * Whether the last pointer down started a mouse drag. Its clicks are then
+   * swallowed, and the one that was not a drag is dispatched again on release.
+   * Touch, pens and a mouse over a carousel with nothing to scroll are left to
+   * click normally.
+   */
+  isHoldingClicks: boolean;
   scrollSnapType: string;
   cachedScrollWidth: number;
   cachedOffsetWidth: number;
@@ -1927,7 +1933,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       initialTarget: null as MaybeNull<EventTarget>,
       initialPointerPosition: null as MaybeNull<{ x: number; y: number }>,
       mouseDirection: 0,
-      lastPointerType: "",
+      isHoldingClicks: false,
       scrollSnapType: scrollSnapType ?? "",
       cachedScrollWidth: 0,
       cachedOffsetWidth: 0,
@@ -2228,25 +2234,26 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      */
     const handlePointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
-        scrollStateRef.current.lastPointerType = event.pointerType;
-        scrollStateRef.current.isPointerDown = true;
+        const state = scrollStateRef.current;
+        state.isHoldingClicks = false;
+        state.isPointerDown = true;
         // dragging looks after its own snapping, from here on the wheel has no
         // say in it
-        scrollStateRef.current.isWheelSnapSuspended = false;
+        state.isWheelSnapSuspended = false;
         if (event.pointerType !== "mouse" || event.button !== 0) {
+          return;
+        }
+        const container = viewportRef.current;
+        // content that fits has nowhere to be dragged to, leave the pointer to
+        // select text and click as it would anywhere else
+        if (!container || container.scrollWidth <= container.clientWidth) {
           return;
         }
         event.currentTarget.setPointerCapture?.(event.pointerId);
 
-        const state = scrollStateRef.current;
         if (state.animationId !== null) {
           cancelAnimationFrame(state.animationId);
           state.animationId = null;
-        }
-
-        const container = viewportRef.current;
-        if (!container) {
-          return;
         }
 
         container.addEventListener("wheel", preventWheelScroll, {
@@ -2256,6 +2263,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         state.cachedScrollWidth = container.scrollWidth;
         state.cachedOffsetWidth = container.offsetWidth;
         state.isDragging = true;
+        state.isHoldingClicks = true;
         state.startX = event.clientX;
         state.lastX = event.clientX;
         state.scrollLeft = container.scrollLeft ?? 0;
@@ -2881,7 +2889,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           // detail === 0 means the click was synthesized by the keyboard (Enter/Space),
           // not by a pointer device — let it through unconditionally
           if (
-            scrollStateRef.current.lastPointerType === "mouse" &&
+            scrollStateRef.current.isHoldingClicks &&
             !scrollStateRef.current.isDispatchingClick &&
             event.detail !== 0
           ) {

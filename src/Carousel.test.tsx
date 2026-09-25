@@ -1,5 +1,6 @@
 import {
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -13,7 +14,7 @@ import type { MaybeUndefined } from "./utils/maybe.js";
 // --- Helpers ---
 
 /**
- * jsdom has no layout engine. This stubs the three properties the component
+ * jsdom has no layout engine. This stubs the properties the component
  * reads to decide whether—and how far—it can scroll.
  *
  * Default values produce a container that is 300px wide and has 1000px of
@@ -33,6 +34,11 @@ const stubViewportLayout = (
     configurable: true,
   });
   Object.defineProperty(el, "offsetWidth", {
+    get: () => offsetWidth,
+    configurable: true,
+  });
+  // no scrollbar in the way, the viewport's inner width is its outer width
+  Object.defineProperty(el, "clientWidth", {
     get: () => offsetWidth,
     configurable: true,
   });
@@ -546,6 +552,7 @@ describe("Carousel", () => {
       const onClick = vi.fn();
       renderClickableCarousel(onClick);
       const vp = getViewport();
+      stubViewportLayout(vp);
       const btn = screen.getByRole("button", { name: "clickable" });
 
       // pointerDown on the inner button — capture listener on the viewport
@@ -577,10 +584,37 @@ describe("Carousel", () => {
       expect(onClick).not.toHaveBeenCalled();
     });
 
+    it("leaves clicks alone when the content fits and there is nothing to drag", () => {
+      const onClick = vi.fn();
+      renderClickableCarousel(onClick);
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollWidth: 200, offsetWidth: 300 });
+      const btn = screen.getByRole("button", { name: "clickable" });
+
+      fireEvent.pointerDown(btn, {
+        pointerType: "mouse",
+        pointerId: 1,
+        clientX: 0,
+        clientY: 0,
+        bubbles: true,
+      });
+      fireEvent.pointerUp(vp, {
+        pointerType: "mouse",
+        pointerId: 1,
+        clientX: 0,
+        clientY: 0,
+      });
+      fireEvent.click(btn, { detail: 1 });
+
+      // the browser's own click, and not a second one dispatched on release
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
     it("allows clicks on children when the pointer barely moved (< 3px)", () => {
       const onClick = vi.fn();
       renderClickableCarousel(onClick);
       const vp = getViewport();
+      stubViewportLayout(vp);
       const btn = screen.getByRole("button", { name: "clickable" });
 
       fireEvent.pointerDown(btn, {
@@ -2108,6 +2142,7 @@ describe("Carousel", () => {
     it("mouse pointerDown sets overflow to hidden to lock out native wheel scroll during drag", () => {
       renderCarousel();
       const vp = getViewport();
+      stubViewportLayout(vp);
 
       fireEvent.pointerDown(vp, {
         pointerType: "mouse",
@@ -2117,6 +2152,24 @@ describe("Carousel", () => {
       });
 
       expect(vp.style.overflowX).toBe("hidden");
+    });
+
+    it("does not initiate drag on mouse pointerDown when the content fits", () => {
+      renderCarousel();
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollWidth: 200, offsetWidth: 300 });
+
+      const pointerDown = createEvent.pointerDown(vp, {
+        pointerType: "mouse",
+        pointerId: 1,
+        clientX: 0,
+        clientY: 0,
+      });
+      fireEvent(vp, pointerDown);
+
+      expect(vp.style.overflowX).not.toBe("hidden");
+      // text selection and native drag and drop are left to the browser
+      expect(pointerDown.defaultPrevented).toBe(false);
     });
   });
 });
