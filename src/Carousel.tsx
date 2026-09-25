@@ -2878,6 +2878,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       }
     }, []);
 
+    const fits = !loop && !scrollsBackwards && !scrollsForwards;
+
     return (
       <div
         {...props}
@@ -2954,10 +2956,14 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
                 }
               : {}),
             position: "relative",
-            overflowX: "scroll",
+            // Content that fits has nowhere to go: stop being a scroller for
+            // the user, so wheel and trackpad gestures reach the page instead
+            // of being contained by a viewport that cannot move. A loop always
+            // has its copies to scroll through, fitting or not.
+            overflowX: fits ? "hidden" : "scroll",
             contain: "layout style",
             msOverflowStyle: "none",
-            overscrollBehaviorX: "contain",
+            overscrollBehaviorX: fits ? "auto" : "contain",
             scrollbarColor: "transparent transparent",
             scrollbarWidth: "none",
             scrollSnapType,

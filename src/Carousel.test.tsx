@@ -2124,9 +2124,14 @@ describe("Carousel", () => {
   });
 
   describe("non-mouse pointer input", () => {
-    it("does not initiate drag on touch pointerDown", () => {
+    it("does not initiate drag on touch pointerDown", async () => {
       renderCarousel();
       const vp = getViewport();
+      stubViewportLayout(vp);
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(vp.style.overflowX).toBe("scroll");
+      });
 
       fireEvent.pointerDown(vp, {
         pointerType: "touch",
@@ -2167,9 +2172,49 @@ describe("Carousel", () => {
       });
       fireEvent(vp, pointerDown);
 
-      expect(vp.style.overflowX).not.toBe("hidden");
       // text selection and native drag and drop are left to the browser
       expect(pointerDown.defaultPrevented).toBe(false);
+    });
+  });
+
+  describe("content that fits", () => {
+    it("stops the viewport from scrolling or containing overscroll", async () => {
+      renderCarousel();
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollWidth: 200, offsetWidth: 300 });
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(vp.style.overflowX).toBe("hidden");
+      });
+      expect(vp.style.overscrollBehaviorX).toBe("auto");
+    });
+
+    it("scrolls again once the content overflows", async () => {
+      renderCarousel();
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollWidth: 200, offsetWidth: 300 });
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(vp.style.overflowX).toBe("hidden");
+      });
+
+      stubViewportLayout(vp);
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(vp.style.overflowX).toBe("scroll");
+      });
+      expect(vp.style.overscrollBehaviorX).toBe("contain");
+    });
+
+    it("keeps a looping carousel scrollable", async () => {
+      renderCarousel({}, { loop: true });
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollWidth: 200, offsetWidth: 300 });
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(vp.getAttribute("data-can-scroll")).toBe("none");
+      });
+      expect(vp.style.overflowX).toBe("scroll");
     });
   });
 });
