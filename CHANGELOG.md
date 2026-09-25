@@ -1,5 +1,11 @@
 # react-headless-carousel
 
+## 1.2.2
+
+### Patch Changes
+
+- 404a51a: fix: Don't start a mouse drag when the carousel content fits and there is nothing to scroll
+
 ## 1.2.1
 
 ### Patch Changes
