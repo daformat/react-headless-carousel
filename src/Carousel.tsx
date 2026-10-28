@@ -2242,7 +2242,17 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         // dragging looks after its own snapping, from here on the wheel has no
         // say in it
         state.isWheelSnapSuspended = false;
-        if (event.pointerType !== "mouse" || event.button !== 0) {
+        // a modified press (new tab, window, download) is not a drag: leave it
+        // to the browser, since the click re-dispatched after a drag drops the
+        // modifiers
+        if (
+          event.pointerType !== "mouse" ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        ) {
           return;
         }
         const container = viewportRef.current;
