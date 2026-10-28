@@ -1473,7 +1473,9 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
       );
 
       /** everything with a claim on the scroll, by name so they can stack */
-      const pausedBy = new Set<string>();
+      const pausedBy = new Set<string>(
+        document.visibilityState === "hidden" ? ["hidden"] : [],
+      );
       let frame: MaybeNull<number> = null;
       let timer: MaybeUndefined<ReturnType<typeof setInterval>> = undefined;
       let lastFrameTime = 0;
