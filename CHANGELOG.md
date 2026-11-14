@@ -1,5 +1,15 @@
 # react-headless-carousel
 
+## 1.3.0
+
+### Minor Changes
+
+- 8eb2531: feat: support RTL direction
+
+### Patch Changes
+
+- 5c32d4d: fix: Support right-to-left carousels: scroll state, prev / next, scroll-into-view, dragging, momentum, rubber-banding, the content fade, autoplay, looping and keyboard focus now follow the viewport's computed `direction`
+
 ## 1.2.4
 
 ### Patch Changes
