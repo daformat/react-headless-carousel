@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "carousel-playground",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["playground"],
+      "port": 5199
+    }
+  ]
+}

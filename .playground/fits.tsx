@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { Carousel } from "../src/Carousel.js";
+import { describeScroll, DirectionControls } from "./direction.js";
 
 /**
  * A carousel whose content may or may not overflow. Drag, click the buttons,
@@ -29,8 +30,7 @@ const Demo = ({
       }
       setInfo(
         JSON.stringify({
-          scrollLeft: Math.round(vp.scrollLeft),
-          maxScroll: Math.round(vp.scrollWidth - vp.clientWidth),
+          ...describeScroll(vp),
           overflowX: vp.style.overflowX,
           selection: document.getSelection()?.toString().slice(0, 40) ?? "",
         }),
@@ -78,7 +78,7 @@ const Demo = ({
 };
 
 createRoot(document.getElementById("root")!).render(
-  <>
+  <DirectionControls>
     <p>
       When the content fits, a mouse drag should not be taken over: text
       selects, links drag natively and each button click counts once. Add items
@@ -88,5 +88,5 @@ createRoot(document.getElementById("root")!).render(
     <Demo label="fits" initialCount={3} />
     <Demo label="overflows" initialCount={12} />
     <Demo label="fits-loop" initialCount={3} loop />
-  </>,
+  </DirectionControls>,
 );

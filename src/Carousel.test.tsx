@@ -13,6 +13,9 @@ import type { MaybeUndefined } from "./utils/maybe.js";
 
 // --- Helpers ---
 
+// jsdom's own, kept before the tests stub it out
+const RealMutationObserver = globalThis.MutationObserver;
+
 /**
  * jsdom has no layout engine. This stubs the properties the component
  * reads to decide whether—and how far—it can scroll.
@@ -165,6 +168,7 @@ const isViewport = (el: HTMLElement) =>
 const isItem = (el: HTMLElement) => el.hasAttribute("data-carousel-item");
 const getViewportOf = (el: HTMLElement) =>
   isViewport(el) ? el : el.closest<HTMLElement>("[data-carousel-viewport]");
+const isRtl = (el: HTMLElement) => getComputedStyle(el).direction === "rtl";
 const getContentWidth = (viewport: HTMLElement) => {
   const content = viewport.querySelector("[data-carousel-content]");
   return (content?.children.length ?? 0) * ITEM_WIDTH;
@@ -200,7 +204,11 @@ const stubLayout = () => {
     set(this: HTMLElement, value: number) {
       // browsers clamp the scroll position to the scrollable range
       const maxScroll = Math.max(0, this.scrollWidth - this.clientWidth);
-      scrollPositions.set(this, Math.max(0, Math.min(value, maxScroll)));
+      // under rtl the scroll range is [-maxScroll, 0]
+      const clamped = isRtl(this)
+        ? Math.min(0, Math.max(value, -maxScroll))
+        : Math.max(0, Math.min(value, maxScroll));
+      scrollPositions.set(this, clamped);
     },
   });
   patch("scrollWidth", {
@@ -231,8 +239,11 @@ const stubLayout = () => {
           this.parentElement.children,
           this,
         );
-        left = index * ITEM_WIDTH - scrollLeft;
         width = ITEM_WIDTH;
+        left =
+          viewport && isRtl(viewport)
+            ? VIEWPORT_WIDTH - (index + 1) * ITEM_WIDTH - scrollLeft
+            : index * ITEM_WIDTH - scrollLeft;
       } else if (viewport) {
         left = -scrollLeft;
         width = getContentWidth(viewport);
@@ -464,6 +475,315 @@ describe("Carousel", () => {
       });
       fireEvent.click(screen.getByRole("button", { name: "prev" }));
       expect(vp.scrollTo).toHaveBeenCalled();
+    });
+  });
+
+  describe("right-to-left", () => {
+    const rtl = { style: { direction: "rtl" } } as const;
+    const isDisabled = (name: string) =>
+      (screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+    afterEach(() => {
+      restoreLayout();
+      vi.unstubAllGlobals();
+    });
+
+    it("can only go forwards at the inline start (scrollLeft 0)", async () => {
+      renderCarousel(rtl);
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollLeft: 0 });
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(isDisabled("prev")).toBe(true);
+        expect(isDisabled("next")).toBe(false);
+      });
+    });
+
+    it("can go both ways in the middle (negative scrollLeft)", async () => {
+      renderCarousel(rtl);
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollLeft: -350 });
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(isDisabled("prev")).toBe(false);
+        expect(isDisabled("next")).toBe(false);
+      });
+    });
+
+    it("can only go backwards at the inline end (scrollLeft -700)", async () => {
+      renderCarousel(rtl);
+      const vp = getViewport();
+      stubViewportLayout(vp, { scrollLeft: -700 });
+      fireEvent.scroll(vp);
+      await waitFor(() => {
+        expect(isDisabled("prev")).toBe(false);
+        expect(isDisabled("next")).toBe(true);
+      });
+    });
+
+    it("scrolls to a negative scrollLeft when going forwards", async () => {
+      stubLayout();
+      vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+      renderCarousel(rtl);
+      const vp = getViewport();
+      fireEvent.scroll(vp);
+      await waitFor(() => expect(isDisabled("next")).toBe(false));
+      fireEvent.click(screen.getByRole("button", { name: "next" }));
+      expect(vp.scrollLeft).toBeLessThan(0);
+      expect(vp.scrollLeft).toBe(-200);
+    });
+
+    it("restores the raw (negative) scroll position after measuring a snap", async () => {
+      stubLayout();
+      vi.stubGlobal("requestAnimationFrame", () => 1);
+      renderCarousel(rtl);
+      const vp = getViewport();
+      vp.scrollLeft = -100;
+      fireEvent.scroll(vp);
+      await waitFor(() => expect(isDisabled("next")).toBe(false));
+      fireEvent.click(screen.getByRole("button", { name: "next" }));
+      expect(vp.scrollLeft).toBe(-100);
+    });
+
+    it("scrolls back towards 0 when going backwards", async () => {
+      stubLayout();
+      vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+        cb(0);
+        return 1;
+      });
+      renderCarousel(rtl);
+      const vp = getViewport();
+      vp.scrollLeft = -200;
+      fireEvent.scroll(vp);
+      await waitFor(() => expect(isDisabled("prev")).toBe(false));
+      fireEvent.click(screen.getByRole("button", { name: "prev" }));
+      expect(vp.scrollLeft).toBe(0);
+    });
+
+    const renderFocusable = (rootProps: { loop?: boolean } = {}) =>
+      render(
+        <Carousel.Root
+          boundaryOffset={{ x: 0, y: 0 }}
+          loop={false}
+          {...rootProps}
+        >
+          <Carousel.Viewport style={{ direction: "rtl" }}>
+            <Carousel.Content>
+              {Array.from({ length: 5 }, (_, i) => (
+                <Carousel.Item key={i}>
+                  <button type="button">Item {i}</button>
+                </Carousel.Item>
+              ))}
+            </Carousel.Content>
+          </Carousel.Viewport>
+        </Carousel.Root>,
+      );
+
+    const drag = (vp: HTMLElement, from: number, to: number) => {
+      vi.useFakeTimers({ toFake: ["Date"], now: 0 });
+      fireEvent.pointerDown(vp, {
+        pointerType: "mouse",
+        pointerId: 1,
+        clientX: from,
+        clientY: 0,
+      });
+      vi.setSystemTime(100);
+      fireEvent.pointerMove(vp, {
+        pointerType: "mouse",
+        pointerId: 1,
+        clientX: to,
+        clientY: 0,
+      });
+      vi.useRealTimers();
+    };
+
+    const getTranslatedItems = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>("[data-carousel-item]"),
+      ).filter((item) =>
+        (item.getAttribute("style") ?? "").includes("translate"),
+      );
+
+    it("fades from the right, where the inline start is", async () => {
+      renderCarousel(rtl);
+      await waitFor(() =>
+        expect(getViewport().style.maskImage).toContain("to left"),
+      );
+    });
+
+    /**
+     * Lets `dir` attributes decide the direction, with real mutation
+     * observers to notice them changing. jsdom neither derives `direction`
+     * from `dir` nor inherits it, so the nearest `dir` stands in for what a
+     * browser would compute.
+     */
+    const followDirAttributes = () => {
+      vi.stubGlobal("MutationObserver", RealMutationObserver);
+      const getStyle = window.getComputedStyle.bind(window);
+      vi.spyOn(window, "getComputedStyle").mockImplementation((element) => {
+        const style = getStyle(element);
+        const dir = element.closest("[dir]")?.getAttribute("dir");
+        return new Proxy(style, {
+          get: (target, key) => {
+            if (key === "direction" && dir) {
+              return dir;
+            }
+            const value: unknown = Reflect.get(target, key, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      });
+    };
+
+    const fadingCarousel = (
+      <Carousel.Root boundaryOffset={{ x: 0, y: 0 }} loop={false}>
+        <Carousel.Viewport>
+          <Carousel.Content>
+            <Carousel.Item>Item</Carousel.Item>
+          </Carousel.Content>
+        </Carousel.Viewport>
+      </Carousel.Root>
+    );
+
+    it("moves the fade across as soon as an ancestor's dir flips", async () => {
+      followDirAttributes();
+      const { container } = render(<div dir="rtl">{fadingCarousel}</div>);
+      await waitFor(() =>
+        expect(getViewport().style.maskImage).toContain("to left"),
+      );
+      // no scroll, resize or content change: only the attribute moves
+      container.querySelector("[dir]")?.setAttribute("dir", "ltr");
+      await waitFor(() =>
+        expect(getViewport().style.maskImage).toContain("to right"),
+      );
+    });
+
+    it("sees a dir flip inside the shadow root it is rendered in", async () => {
+      followDirAttributes();
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const shadow = host.attachShadow({ mode: "open" });
+      const wrapper = document.createElement("div");
+      wrapper.setAttribute("dir", "rtl");
+      const mount = document.createElement("div");
+      wrapper.appendChild(mount);
+      shadow.appendChild(wrapper);
+      render(fadingCarousel, { container: mount });
+      const viewport = () =>
+        shadow.querySelector<HTMLElement>("[data-carousel-viewport]");
+      await waitFor(() =>
+        expect(viewport()?.style.maskImage).toContain("to left"),
+      );
+      wrapper.setAttribute("dir", "ltr");
+      await waitFor(() =>
+        expect(viewport()?.style.maskImage).toContain("to right"),
+      );
+      cleanup();
+      host.remove();
+    });
+
+    it("hands a tab arriving at the inline end to what is on screen", () => {
+      stubLayout();
+      renderFocusable();
+      const vp = getViewport();
+      // the inline end: items 2, 3 and 4 are on screen
+      vp.scrollLeft = -200;
+      fireEvent.keyDown(document.body, { key: "Tab" });
+      screen.getByRole("button", { name: "Item 0" }).focus();
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Item 2" }),
+      );
+      expect(vp.scrollLeft).toBe(-200);
+    });
+
+    it("puts the scroll back where it was after measuring a focus scroll", () => {
+      stubLayout();
+      renderFocusable();
+      const vp = getViewport();
+      // item 0 is half off the inline start
+      vp.scrollLeft = -50;
+      // the frame the scroll waits for never comes, so nothing should move
+      screen.getByRole("button", { name: "Item 0" }).focus();
+      expect(vp.scrollLeft).toBe(-50);
+    });
+
+    it("drags the content along with the pointer", () => {
+      stubLayout();
+      renderCarousel(rtl);
+      const vp = getViewport();
+      vp.scrollLeft = -100;
+      // pulling the content leftwards brings in what is to its right, which is
+      // back towards the inline start
+      drag(vp, 100, 50);
+      expect(vp.scrollLeft).toBe(-50);
+      expect(getTranslatedItems()).toHaveLength(0);
+    });
+
+    it("rubber-bands when dragged past the inline start", () => {
+      stubLayout();
+      renderCarousel(rtl);
+      const vp = getViewport();
+      drag(vp, 100, 50);
+      expect(vp.scrollLeft).toBe(0);
+      expect(getTranslatedItems().length).toBeGreaterThan(0);
+      // the items follow the pointer, leftwards
+      expect(
+        parseFloat(
+          vp.style.getPropertyValue("--carousel-overscroll-translate-x"),
+        ),
+      ).toBeLessThan(0);
+    });
+
+    it("plays continuously towards the inline end", () => {
+      const frames: FrameRequestCallback[] = [];
+      vi.stubGlobal(
+        "requestAnimationFrame",
+        vi.fn((cb: FrameRequestCallback) => frames.push(cb)),
+      );
+      renderCarousel(rtl, {
+        autoplay: { mode: "continuous", speed: 100 },
+        loop: false,
+      });
+      const vp = getViewport();
+      stubViewportLayout(vp, {
+        scrollWidth: ITEM_WIDTH * 5,
+        offsetWidth: VIEWPORT_WIDTH,
+      });
+      fireEvent.scroll(vp);
+      const nextFrame = (time: number) => frames[frames.length - 1]?.(time);
+      nextFrame(100);
+      nextFrame(200);
+      expect(vp.scrollLeft).toBe(-10);
+    });
+
+    it("opens a loop on the original children, at the inline start", () => {
+      stubLayout();
+      renderCarousel(rtl, { loop: true });
+      const vp = getViewport();
+      const items = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-carousel-item]"),
+      );
+      const setWidth = (items.length / 3) * ITEM_WIDTH;
+      expect(vp.scrollLeft).toBe(-setWidth);
+      const firstOriginal = items.find(
+        (item) => !item.hasAttribute("data-loop-clone"),
+      );
+      expect(firstOriginal?.getBoundingClientRect().right).toBe(VIEWPORT_WIDTH);
+    });
+
+    it("wraps a loop by whole copies near the inline end", () => {
+      stubLayout();
+      renderCarousel(rtl, { loop: true });
+      const vp = getViewport();
+      const maxScroll = vp.scrollWidth - vp.clientWidth;
+      const brink = -(maxScroll - 10);
+      vp.scrollLeft = brink;
+      fireEvent.scroll(vp);
+      const delta = vp.scrollLeft - brink;
+      expect(delta).toBeGreaterThan(0);
+      expect(delta % (ITEM_WIDTH * 5)).toBe(0);
     });
   });
 

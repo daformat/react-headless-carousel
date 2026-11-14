@@ -202,6 +202,18 @@ scrolling. Renders a `<div>` with `overflow: scroll` and hidden scrollbars.
 | `data-carousel-viewport` | `""`                                                  | Always present. Used internally for boundary offset calculation.                                           |
 | `data-can-scroll`        | `"forwards"` \| `"backwards"` \| `"both"` \| `"none"` | Reflects the current scrollability. Useful for styling buttons or indicators with CSS attribute selectors. |
 
+#### Right-to-left
+
+The carousel follows the viewport's computed `direction`, so a `dir="rtl"` anywhere above it (or `direction: rtl` on
+the viewport itself) is all it takes. Forwards always means towards the inline end, which is the left in RTL: the next
+button, `autoplay`, dragging, looping, keyboard focus and the content fade all follow it. The direction is read when it
+is needed, and changing a `dir` attribute at runtime, on the viewport or anywhere above it (inside a shadow root too), is
+picked up straight away. A `direction` changed some other way, such as by toggling a class, is picked up by the next
+scroll, resize or content change.
+
+`--carousel-remaining-forwards` and `--carousel-remaining-backwards` are logical distances in both directions, and
+`--carousel-overscroll-translate-x` stays a physical `translate` value.
+
 ---
 
 ### `Carousel.Content`

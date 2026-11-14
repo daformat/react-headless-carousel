@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { Carousel } from "../src/Carousel.js";
+import { describeScroll, DirectionControls } from "./direction.js";
 
 const Demo = ({
   label,
@@ -13,6 +14,7 @@ const Demo = ({
   align = "start",
   focusable = false,
   modes = false,
+  fade = false,
 }: {
   label: string;
   count: number;
@@ -23,6 +25,7 @@ const Demo = ({
   align?: "start" | "center" | "end";
   focusable?: boolean;
   modes?: boolean;
+  fade?: boolean;
 }) => {
   const [info, setInfo] = useState("");
   useEffect(() => {
@@ -34,8 +37,7 @@ const Demo = ({
       const content = vp.querySelector<HTMLElement>("[data-carousel-content]")!;
       setInfo(
         JSON.stringify({
-          scrollLeft: Math.round(vp.scrollLeft),
-          maxScroll: Math.round(vp.scrollWidth - vp.clientWidth),
+          ...describeScroll(vp),
           items: content.children.length,
           snap: vp.style.scrollSnapType || "(none)",
           autoplay:
@@ -55,7 +57,7 @@ const Demo = ({
           id={`vp-${label}`}
           className="viewport"
           scrollSnapType={snap}
-          contentFade={false}
+          contentFade={fade}
         >
           <Carousel.Content className="content">
             {Array.from({ length: count }, (_, i) => (
@@ -112,7 +114,7 @@ const Toggle = () => {
 };
 
 createRoot(document.getElementById("root")!).render(
-  <>
+  <DirectionControls>
     <Toggle />
     <Demo label="focus-snap" count={6} loop focusable snap="x mandatory" />
     <Demo label="focus-nosnap" count={6} loop focusable />
@@ -121,6 +123,8 @@ createRoot(document.getElementById("root")!).render(
     <Demo label="loop-nosnap" count={6} loop />
     <Demo label="loop-few" count={2} loop snap="x mandatory" />
     <Demo label="no-loop" count={6} loop={false} snap="x mandatory" />
+    <Demo label="fade" count={8} loop={false} snap="x mandatory" fade />
+    <Demo label="fade-loop" count={6} loop snap="x mandatory" fade />
     <Demo
       label="auto-continuous"
       count={6}
@@ -182,5 +186,5 @@ createRoot(document.getElementById("root")!).render(
       snap="x mandatory"
       autoplay={{ mode: "item", interval: 500, atEnd: "stop" }}
     />
-  </>,
+  </DirectionControls>,
 );

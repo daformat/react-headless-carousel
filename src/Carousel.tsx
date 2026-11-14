@@ -89,9 +89,22 @@ const CSS_VARS = Object.freeze({
 type ScrollState = {
   isDragging: boolean;
   isDispatchingClick: boolean;
+  /**
+   * Pointer positions along the inline axis: `clientX`, mirrored under rtl so
+   * that a larger value is always further towards the inline end.
+   */
   startX: number;
+  /**
+   * The drag, momentum and autoplay baseline, as an offset from the inline
+   * start (see `getScrollOffset`).
+   */
   scrollLeft: number;
   lastX: number;
+  /**
+   * The viewport's `getInlineSign`, taken when a drag or momentum starts so
+   * the per-move and per-frame work does not have to compute styles.
+   */
+  inlineSign: 1 | -1;
   lastTime: number;
   velocityX: number;
   totalTraveledX: number;
@@ -145,7 +158,8 @@ type ScrollState = {
    */
   ignoresReducedMotion: boolean;
   /**
-   * Where the scroll was as of the last scroll event. Adding or removing the
+   * Where the scroll was as of the last scroll event, as an offset from the
+   * inline start. Adding or removing the
    * looping copies changes how much content sits in front of the position, and
    * once they are gone the browser has already clamped `scrollLeft` — so the
    * figure has to have been kept beforehand.
@@ -244,13 +258,73 @@ const defaultBoundaryOffset = (container: HTMLElement) => {
 };
 
 /**
- * Returns the element's left offset relative to the scroll container's content
- * coordinate space, regardless of intermediate offsetParent ancestors.
+ * Whether the viewport lays its content out right to left. Read from the
+ * computed style every time rather than remembered, so a `dir` flipped at
+ * runtime applies to the very next measurement.
  */
-const getOffsetLeft = (element: HTMLElement, container: HTMLElement): number =>
-  element.getBoundingClientRect().left -
-  container.getBoundingClientRect().left +
-  container.scrollLeft;
+const isRtlContainer = (container: HTMLElement): boolean =>
+  getComputedStyle(container).direction === "rtl";
+
+/**
+ * Which way the inline axis runs on screen: 1 when moving forwards goes right,
+ * -1 when it goes left. Multiplying a physical horizontal distance (a pointer
+ * delta, a translate) by it turns it into a logical one, and back.
+ */
+const getInlineSign = (container: HTMLElement): 1 | -1 =>
+  isRtlContainer(container) ? -1 : 1;
+
+/**
+ * Returns how far the container is scrolled from its inline start, as a
+ * non-negative number. Under `direction: rtl` browsers report `scrollLeft` as 0
+ * at the start and negative towards the end, so it is mirrored here.
+ *
+ * Every position the carousel computes, compares or remembers is one of these,
+ * so the same arithmetic serves both directions. Only the reads and writes of
+ * `scrollLeft` itself go through the conversion.
+ */
+const getScrollOffset = (container: HTMLElement): number =>
+  isRtlContainer(container)
+    ? Math.abs(container.scrollLeft)
+    : container.scrollLeft;
+
+/**
+ * Converts an offset from the inline start, as returned by `getScrollOffset`,
+ * back to a `scrollLeft` value.
+ */
+const toScrollLeft = (container: HTMLElement, offset: number): number =>
+  isRtlContainer(container) && offset !== 0 ? -offset : offset;
+
+/** Sets the scroll position, given as an offset from the inline start. */
+const setScrollOffset = (container: HTMLElement, offset: number) => {
+  container.scrollLeft = toScrollLeft(container, offset);
+};
+
+/** `scrollTo`, given an offset from the inline start. */
+const scrollToOffset = (
+  container: HTMLElement,
+  offset: number,
+  behavior: ScrollToOptions["behavior"],
+) => {
+  container.scrollTo({ left: toScrollLeft(container, offset), behavior });
+};
+
+/**
+ * Returns the distance from the container's inline start to the element's
+ * inline start edge, in the scroll container's content coordinate space,
+ * regardless of intermediate offsetParent ancestors. It is measured from the
+ * left edges in LTR and from the right edges in RTL, so it compares directly
+ * with `getScrollOffset`.
+ */
+const getInlineOffset = (
+  element: HTMLElement,
+  container: HTMLElement,
+): number => {
+  const elementRect = element.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  return isRtlContainer(container)
+    ? containerRect.right - elementRect.right + Math.abs(container.scrollLeft)
+    : elementRect.left - containerRect.left + container.scrollLeft;
+};
 
 type LoopMetrics = {
   /**
@@ -299,9 +373,9 @@ const measureLoopMetrics = (container: HTMLElement): MaybeNull<LoopMetrics> => {
   ) {
     return null;
   }
-  const firstLeft = getOffsetLeft(first, container);
-  const naturalWidth = getOffsetLeft(nextCopy, container) - firstLeft;
-  const setWidth = getOffsetLeft(nextSet, container) - firstLeft;
+  const firstLeft = getInlineOffset(first, container);
+  const naturalWidth = getInlineOffset(nextCopy, container) - firstLeft;
+  const setWidth = getInlineOffset(nextSet, container) - firstLeft;
   if (naturalWidth <= 0 || setWidth <= 0) {
     return null;
   }
@@ -391,8 +465,8 @@ const getTabbableElements = (container: HTMLElement) =>
 const isWithinScrollport = (element: HTMLElement, container: HTMLElement) => {
   const measured =
     element.closest<HTMLElement>("[data-carousel-item]") ?? element;
-  const left = getOffsetLeft(measured, container);
-  const { scrollLeft } = container;
+  const left = getInlineOffset(measured, container);
+  const scrollLeft = getScrollOffset(container);
   return (
     left >= scrollLeft - 1 &&
     left + measured.offsetWidth <= scrollLeft + container.offsetWidth + 1
@@ -519,9 +593,9 @@ const resolveScrollBehavior = (
  * engines have no such attachment, and a style change on the scroller costs them
  * the snap they were about to apply.
  */
-const setLoopScrollLeft = (
+const setLoopScrollOffset = (
   container: HTMLElement,
-  scrollLeft: number,
+  offset: number,
   {
     reselectSnapTarget = false,
     keepFocus = false,
@@ -529,11 +603,11 @@ const setLoopScrollLeft = (
 ) => {
   const reselect = reselectSnapTarget && getIsChromium();
   const scrollSnapType = container.style.scrollSnapType;
-  const before = container.scrollLeft;
+  const before = getScrollOffset(container);
   if (reselect) {
     container.style.scrollSnapType = "none";
   }
-  container.scrollTo({ left: scrollLeft, behavior: "instant" });
+  scrollToOffset(container, offset, "instant");
   if (reselect) {
     container.style.scrollSnapType = scrollSnapType;
   }
@@ -541,7 +615,7 @@ const setLoopScrollLeft = (
   // scroll to suit the focused element, so following the focus afterwards would
   // undo the very thing the jump was for
   if (!keepFocus) {
-    relocateFocusToLoopTwin(container, container.scrollLeft - before);
+    relocateFocusToLoopTwin(container, getScrollOffset(container) - before);
   }
 };
 
@@ -605,8 +679,8 @@ const teleportTowardsFocus = (
   // items are what the carousel scrolls by, so a button at the far edge of one
   // counts as being wherever its item is
   const anchor = target.closest<HTMLElement>("[data-carousel-item]") ?? target;
-  const left = getOffsetLeft(anchor, container);
-  const start = container.scrollLeft;
+  const left = getInlineOffset(anchor, container);
+  const start = getScrollOffset(container);
   // measured from the edge of the viewport rather than from the scroll
   // position: what matters is how far outside the visible band the element is,
   // which is nothing at all when it is already on screen
@@ -644,8 +718,8 @@ const teleportTowardsFocus = (
     }
     return 0;
   }
-  setLoopScrollLeft(container, shifted, { keepFocus: true });
-  return container.scrollLeft - start;
+  setLoopScrollOffset(container, shifted, { keepFocus: true });
+  return getScrollOffset(container) - start;
 };
 
 /**
@@ -663,7 +737,7 @@ const recenterLoopScroll = (container: HTMLElement) => {
   if (!metrics) {
     return 0;
   }
-  const scrollLeft = container.scrollLeft;
+  const scrollLeft = getScrollOffset(container);
   // No need to move for every little scroll: home has a whole set of content
   // behind it and two ahead, so letting the carousel drift a quarter of a set
   // still leaves the tighter side of it more than two viewports to scroll.
@@ -674,10 +748,10 @@ const recenterLoopScroll = (container: HTMLElement) => {
   if (!shift) {
     return 0;
   }
-  setLoopScrollLeft(container, scrollLeft - shift, {
+  setLoopScrollOffset(container, scrollLeft - shift, {
     reselectSnapTarget: true,
   });
-  return container.scrollLeft - scrollLeft;
+  return getScrollOffset(container) - scrollLeft;
 };
 
 /** What one turn of the autoplay does */
@@ -940,7 +1014,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         items: HTMLElement[],
         { alignToItem = true }: { alignToItem?: boolean } = {},
       ) => {
-        const currentScroll = container.scrollLeft;
+        const currentScroll = getScrollOffset(container);
         const offset = rootRef.current
           ? getBoundaryOffset(boundaryOffset, rootRef.current).x
           : 0;
@@ -953,7 +1027,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           if (direction === "forwards") {
             const nextItem = items.find(
               (item) =>
-                getOffsetLeft(item, container) + item.offsetWidth >
+                getInlineOffset(item, container) + item.offsetWidth >
                 currentScroll + container.offsetWidth - offset,
             );
             if (
@@ -961,15 +1035,15 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
               nextItem.offsetWidth < container.offsetWidth - offset * 2
             ) {
               delta =
-                getOffsetLeft(nextItem, container) -
-                container.scrollLeft -
+                getInlineOffset(nextItem, container) -
+                getScrollOffset(container) -
                 offset;
             }
           } else {
             const prevItem = items
               .filter(
                 (item) =>
-                  getOffsetLeft(item, container) < currentScroll + offset,
+                  getInlineOffset(item, container) < currentScroll + offset,
               )
               .reverse()[0];
             if (
@@ -977,8 +1051,8 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
               prevItem.offsetWidth < container.offsetWidth - offset * 2
             ) {
               delta =
-                container.scrollLeft -
-                getOffsetLeft(prevItem, container) -
+                getScrollOffset(container) -
+                getInlineOffset(prevItem, container) -
                 container.offsetWidth -
                 offset;
             }
@@ -990,10 +1064,11 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           0,
           Math.min(scrollPosition, maxScroll),
         );
-        container.scrollTo({
-          left: nextScrollPosition,
-          behavior: resolveScrollBehavior("smooth", scrollStateRef?.current),
-        });
+        scrollToOffset(
+          container,
+          nextScrollPosition,
+          resolveScrollBehavior("smooth", scrollStateRef?.current),
+        );
       },
       [boundaryOffset, scrollStateRef],
     );
@@ -1005,7 +1080,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
     const snapScroll = useCallback(
       (targetScroll: number, container: HTMLElement) => {
         const state = scrollStateRef?.current;
-        const currentScroll = container.scrollLeft;
+        const currentScroll = getScrollOffset(container);
         if (state) {
           // this is a ref, although it's in a state to be able to pass it around,
           // it is safe to mutate it, using the setter would cause unwanted re-renders
@@ -1013,9 +1088,9 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           state.suppressLoopWrap = true;
         }
         container.style.scrollSnapType = state?.scrollSnapType ?? "";
-        container.scrollTo({ left: targetScroll, behavior: "instant" });
-        const snappedScrollPosition = container.scrollLeft;
-        container.scrollTo({ left: currentScroll, behavior: "instant" });
+        scrollToOffset(container, targetScroll, "instant");
+        const snappedScrollPosition = getScrollOffset(container);
+        scrollToOffset(container, currentScroll, "instant");
         if (state) {
           state.suppressLoopWrap = false;
         }
@@ -1052,10 +1127,11 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           // a chance; Firefox does not, which is where it shows.
           const carried = isForFocus ? state?.focusScrollDestination : null;
           const left = carried ?? snappedScroll;
-          container.scrollTo({
+          scrollToOffset(
+            container,
             left,
-            behavior: resolveScrollBehavior(behavior, state),
-          });
+            resolveScrollBehavior(behavior, state),
+          );
         });
       },
       [scrollStateRef, snapScroll],
@@ -1071,24 +1147,25 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           ? getBoundaryOffset(boundaryOffset, rootRef.current).x
           : 0;
         const getIsBeforeAfter = () => {
-          const targetLeft = getOffsetLeft(target, container);
-          const isBefore = targetLeft < container.scrollLeft + offset;
+          const targetLeft = getInlineOffset(target, container);
+          const isBefore = targetLeft < getScrollOffset(container) + offset;
           const isAfter =
             targetLeft + target.offsetWidth >
-            container.scrollLeft + container.offsetWidth - offset;
+            getScrollOffset(container) + container.offsetWidth - offset;
           return { isBefore, isAfter };
         };
         let { isBefore, isAfter } = getIsBeforeAfter();
         // Default when the target is larger than the container
         if (isBefore && isAfter) {
-          const scrollPosition = getOffsetLeft(target, container) - offset;
-          container.scrollTo({
-            left: scrollPosition <= offset ? 0 : scrollPosition,
-            behavior: resolveScrollBehavior("smooth", scrollStateRef?.current),
-          });
+          const scrollPosition = getInlineOffset(target, container) - offset;
+          scrollToOffset(
+            container,
+            scrollPosition <= offset ? 0 : scrollPosition,
+            resolveScrollBehavior("smooth", scrollStateRef?.current),
+          );
         } else if (isBefore || isAfter) {
-          const currentScroll = container.scrollLeft;
-          const targetLeft = getOffsetLeft(target, container);
+          const currentScroll = getScrollOffset(container);
+          const targetLeft = getInlineOffset(target, container);
           let scrollPosition = isBefore
             ? targetLeft - offset
             : targetLeft - container.offsetWidth + target.offsetWidth + offset;
@@ -1110,10 +1187,11 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
             (isBefore || isAfter) &&
             iterations < maxIterations
           ) {
-            container.scrollTo({
-              left: scrollPosition <= offset ? 0 : scrollPosition,
-              behavior: "instant",
-            });
+            scrollToOffset(
+              container,
+              scrollPosition <= offset ? 0 : scrollPosition,
+              "instant",
+            );
             const newState = getIsBeforeAfter();
             isBefore = newState.isBefore;
             isAfter = newState.isAfter;
@@ -1124,7 +1202,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
             }
             iterations++;
           }
-          container.scrollTo({ left: currentScroll, behavior: "instant" });
+          scrollToOffset(container, currentScroll, "instant");
           if (state) {
             state.suppressLoopWrap = false;
           }
@@ -1152,7 +1230,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         const offset = rootRef.current
           ? getBoundaryOffset(boundaryOffset, rootRef.current).x
           : 0;
-        const targetLeft = getOffsetLeft(target, container);
+        const targetLeft = getInlineOffset(target, container);
         let scrollPosition =
           direction === "forwards"
             ? targetLeft - offset
@@ -1201,7 +1279,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
          * from it would ask for a position the carousel is already at.
          */
         const restingPosition = (item: HTMLElement) => {
-          const left = getOffsetLeft(item, container);
+          const left = getInlineOffset(item, container);
           const alignment = alignmentOf(item);
           if (alignment === "center") {
             return left - (container.offsetWidth - item.offsetWidth) / 2;
@@ -1218,7 +1296,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
          * it is passed over for the one behind it. Half an item is generous
          * enough to catch that and small enough never to skip a real step.
          */
-        const scrollLeft = container.scrollLeft;
+        const scrollLeft = getScrollOffset(container);
         const maxScroll = container.scrollWidth - container.clientWidth;
         const isWorthGoingTo = (item: HTMLElement) => {
           // Where it would land, not where it would like to: the last items of
@@ -1267,7 +1345,11 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         clearAnimation();
         const container = viewportRef?.current;
         const root = rootRef?.current;
-        if (root && container && container.scrollLeft < container.scrollWidth) {
+        if (
+          root &&
+          container &&
+          getScrollOffset(container) < container.scrollWidth
+        ) {
           // this is a ref, although it's in a state to be able to pass it around,
           // it is safe to mutate it, using the setter would cause unwanted re-renders
           // eslint-disable-next-line react-hooks/immutability
@@ -1287,7 +1369,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
             });
             return;
           }
-          const currentScroll = container.scrollLeft;
+          const currentScroll = getScrollOffset(container);
           const containerOffsetWidth = container.offsetWidth;
           const { x: boundaryOffsetX } = getBoundaryOffset(
             boundaryOffset,
@@ -1295,7 +1377,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           );
           const isNextItem = (item: HTMLElement) => {
             return (
-              getOffsetLeft(item, container) + item.offsetWidth >
+              getInlineOffset(item, container) + item.offsetWidth >
               Math.ceil(currentScroll + containerOffsetWidth - boundaryOffsetX)
             );
           };
@@ -1338,7 +1420,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         const container = viewportRef?.current;
         const root = rootRef?.current;
         // when looping there is always something before the current position
-        if (root && container && (loop || container.scrollLeft > 0)) {
+        if (root && container && (loop || getScrollOffset(container) > 0)) {
           // this is a ref, although it's in a state to be able to pass it around,
           // it is safe to mutate it, using the setter would cause unwanted re-renders
           // eslint-disable-next-line react-hooks/immutability
@@ -1358,14 +1440,14 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
             });
             return;
           }
-          const currentScroll = container.scrollLeft;
+          const currentScroll = getScrollOffset(container);
           const { x: boundaryOffsetX } = getBoundaryOffset(
             boundaryOffset,
             root,
           );
           const isPrevItem = (item: HTMLElement) => {
             return (
-              currentScroll > getOffsetLeft(item, container) - boundaryOffsetX
+              currentScroll > getInlineOffset(item, container) - boundaryOffsetX
             );
           };
           const prevItems = items.filter(isPrevItem);
@@ -1511,7 +1593,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         if (rewindingTo === null || !container) {
           return false;
         }
-        if (Math.abs(container.scrollLeft - rewindingTo) <= 1) {
+        if (Math.abs(getScrollOffset(container) - rewindingTo) <= 1) {
           rewindingTo = null;
           lastFrameTime = 0;
           return false;
@@ -1532,10 +1614,11 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         }
         rewindingTo =
           sign > 0 ? 0 : container.scrollWidth - container.clientWidth;
-        container.scrollTo({
-          left: rewindingTo,
-          behavior: resolveScrollBehavior("smooth", state),
-        });
+        scrollToOffset(
+          container,
+          rewindingTo,
+          resolveScrollBehavior("smooth", state),
+        );
       };
 
       /**
@@ -1615,7 +1698,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
           // someone else is driving: pick up their position rather than carrying
           // on from where we left off
           if (container) {
-            state.scrollLeft = container.scrollLeft;
+            state.scrollLeft = getScrollOffset(container);
           }
           return;
         }
@@ -1627,7 +1710,7 @@ const CarouselRootImpl = forwardRef<HTMLDivElement, CarouselRootProps>(
         // the opposite of scrolling continuously
         container.style.scrollSnapType = "none";
         state.scrollLeft += (sign * autoplaySpeed * elapsed) / 1000;
-        container.scrollLeft = state.scrollLeft;
+        setScrollOffset(container, state.scrollLeft);
       };
 
       const step = () => {
@@ -1928,6 +2011,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       startX: 0,
       scrollLeft: 0,
       lastX: 0,
+      inlineSign: 1 as 1 | -1,
       lastTime: 0,
       velocityX: 0,
       totalTraveledX: 0,
@@ -1949,6 +2033,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       lastWheelTime: 0,
     });
     const loopMetricsRef = useRef<MaybeNull<LoopMetrics>>(null);
+    // The content fade is the one thing drawn in physical terms (a gradient
+    // has no logical direction), so it needs to know which side the inline
+    // start is on. Picked up with the rest of the scroll state.
+    const [isRtl, setIsRtl] = useState(false);
 
     // Keep the ref in sync with the prop on every render so event handlers
     // always see the current value without needing a layout effect.
@@ -1995,16 +2083,20 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
     const updateScrollState = useCallback(() => {
       const container = viewportRef.current;
       if (container) {
+        const inlineSign = getInlineSign(container);
+        setIsRtl(inlineSign < 0);
+        // the translate is physical: it only grows the scroll width when it
+        // pushes the items towards the inline end
         const translateX = Math.ceil(
           parseFloat(
             container.style.getPropertyValue(CSS_VARS.overscrollTranslateX) ??
               "0",
-          ),
+          ) * inlineSign,
         );
         const containerScrollWidth =
           (container.scrollWidth ?? 0) - (translateX > 0 ? translateX : 0);
         const containerOffsetWidth = container.offsetWidth ?? 0;
-        const containerScrollLeft = container.scrollLeft ?? 0;
+        const containerScrollLeft = getScrollOffset(container) ?? 0;
         scrollStateRef.current.cachedScrollWidth = containerScrollWidth;
         scrollStateRef.current.cachedOffsetWidth = containerOffsetWidth;
         if (!container || containerScrollWidth <= containerOffsetWidth) {
@@ -2093,7 +2185,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       }
       const margin = container.clientWidth;
       const maxScroll = container.scrollWidth - container.clientWidth;
-      const scrollLeft = container.scrollLeft;
+      const scrollLeft = getScrollOffset(container);
       if (
         maxScroll <= margin * 2 ||
         (scrollLeft > margin && scrollLeft < maxScroll - margin)
@@ -2130,12 +2222,12 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       // snap, scrolls all the way back to it — content flying past for hundreds
       // of milliseconds. Making it re-pick from where we land keeps it on the
       // copy the user is actually looking at.
-      setLoopScrollLeft(container, scrollLeft - shift, {
+      setLoopScrollOffset(container, scrollLeft - shift, {
         reselectSnapTarget: true,
       });
       // the drag and momentum baselines track the scroll position themselves,
       // teleport them along with it
-      const delta = container.scrollLeft - scrollLeft;
+      const delta = getScrollOffset(container) - scrollLeft;
       state.scrollLeft += delta;
       return delta;
     }, [getLoopMetrics]);
@@ -2172,14 +2264,14 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
      */
     const getSnapPosition = useCallback((container: HTMLElement) => {
       const state = scrollStateRef.current;
-      const scrollLeft = container.scrollLeft;
+      const scrollLeft = getScrollOffset(container);
       state.suppressLoopWrap = true;
       container.style.scrollSnapType = state.scrollSnapType;
       // a scroll has to actually go somewhere for the browser to snap it
-      container.scrollTo({ left: scrollLeft + 1, behavior: "instant" });
-      const snapped = container.scrollLeft;
+      scrollToOffset(container, scrollLeft + 1, "instant");
+      const snapped = getScrollOffset(container);
       container.style.scrollSnapType = "none";
-      container.scrollTo({ left: scrollLeft, behavior: "instant" });
+      scrollToOffset(container, scrollLeft, "instant");
       state.suppressLoopWrap = false;
       return snapped;
     }, []);
@@ -2205,22 +2297,23 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       ) {
         return;
       }
-      const scrollLeft = container.scrollLeft;
+      const scrollLeft = getScrollOffset(container);
       const snapped = getSnapPosition(container);
       if (Math.abs(snapped - scrollLeft) > 1) {
         // still snapping off, so nothing pulls at the animation. It scrolls,
         // which brings us back here once it in turn goes quiet.
-        container.scrollTo({
-          left: snapped,
-          behavior: resolveScrollBehavior("smooth", state),
-        });
+        scrollToOffset(
+          container,
+          snapped,
+          resolveScrollBehavior("smooth", state),
+        );
         return;
       }
       state.isWheelSnapSuspended = false;
       // We are on the snap point already. Writing the position one last time
       // before handing snapping back is what makes the browser adopt the item
       // we are on rather than the one it was holding on to.
-      container.scrollTo({ left: scrollLeft, behavior: "instant" });
+      scrollToOffset(container, scrollLeft, "instant");
       container.style.scrollSnapType = state.scrollSnapType;
     }, [getSnapPosition]);
 
@@ -2276,9 +2369,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         state.cachedOffsetWidth = container.offsetWidth;
         state.isDragging = true;
         state.isHoldingClicks = true;
-        state.startX = event.clientX;
-        state.lastX = event.clientX;
-        state.scrollLeft = container.scrollLeft ?? 0;
+        state.inlineSign = getInlineSign(container);
+        state.startX = event.clientX * state.inlineSign;
+        state.lastX = state.startX;
+        state.scrollLeft = getScrollOffset(container);
         state.lastTime = Date.now();
         state.velocityX = 0;
         state.totalTraveledX = 0;
@@ -2322,9 +2416,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
               : 0;
         const sign = Math.sign(scrollDelta);
         const easedDistance = iOSRubberBand(overscroll, 0, maxDistance);
+        // the items follow the pointer, which is a physical direction
         container.style.setProperty(
           CSS_VARS.overscrollTranslateX,
-          `${-sign * easedDistance}px`,
+          `${-sign * easedDistance * state.inlineSign}px`,
         );
         items.forEach((item) => {
           // we have to translate the items instead of the content because
@@ -2360,31 +2455,32 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         container.style.scrollSnapType = "none";
         const currentTime = Date.now();
         const deltaTime = currentTime - state.lastTime;
-        const deltaX = event.clientX - state.lastX;
+        const x = event.clientX * state.inlineSign;
+        const deltaX = x - state.lastX;
         state.totalTraveledX += Math.abs(deltaX);
         if (deltaTime > 0) {
           state.velocityX = deltaX / deltaTime; // (pixels per millisecond)
           clampVelocity(maxAbsoluteVelocity);
         }
 
-        const scrollDelta = state.startX - event.clientX;
-        const direction = Math.sign(state.startX - event.clientX);
+        const scrollDelta = state.startX - x;
+        const direction = Math.sign(scrollDelta);
         if (direction !== state.mouseDirection) {
           state.mouseDirection = direction;
         }
-        container.scrollLeft = state.scrollLeft + scrollDelta;
+        setScrollOffset(container, state.scrollLeft + scrollDelta);
         // wrap right away rather than waiting for the scroll event, so the next
         // move is computed from the position we actually ended up on
         wrapLoopScroll();
-        state.lastX = event.clientX;
+        state.lastX = x;
         state.lastTime = currentTime;
 
         // a looping carousel has no boundary to bounce against
+        const scrolled = getScrollOffset(container);
         if (
           !loop &&
-          (container.scrollLeft <= 1 ||
-            container.scrollLeft >=
-              container.scrollWidth - container.offsetWidth - 1)
+          (scrolled <= 1 ||
+            scrolled >= container.scrollWidth - container.offsetWidth - 1)
         ) {
           applyRubberBanding(container, scrollDelta);
           clampVelocity(maxAbsoluteVelocity);
@@ -2416,10 +2512,10 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         const probeShift = metrics ? getLoopShift(tFinalScroll, metrics) : 0;
         state.suppressLoopWrap = true;
         container.style.scrollSnapType = state.scrollSnapType;
-        container.scrollLeft = tFinalScroll - probeShift;
-        const snappedScroll = container.scrollLeft + probeShift;
+        setScrollOffset(container, tFinalScroll - probeShift);
+        const snappedScroll = getScrollOffset(container) + probeShift;
         container.style.scrollSnapType = "none";
-        container.scrollLeft = initialScroll;
+        setScrollOffset(container, initialScroll);
         state.suppressLoopWrap = false;
 
         const { finalScroll, iterations } = getFinalScroll(
@@ -2463,17 +2559,17 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         const minVelocityForSnapping = 0;
         const state = scrollStateRef.current;
         // a looping carousel has no boundary to bounce against
+        const scrolled = getScrollOffset(container);
         const isRubberBanding =
           !loop &&
-          (container.scrollLeft <= 1 ||
-            container.scrollLeft >=
-              state.cachedScrollWidth - state.cachedOffsetWidth - 1);
+          (scrolled <= 1 ||
+            scrolled >= state.cachedScrollWidth - state.cachedOffsetWidth - 1);
         const rubberBandingFactor = isRubberBanding
           ? (state.velocityX * 25) / state.cachedScrollWidth
           : 0;
         const friction = 0.05 + Math.abs(rubberBandingFactor);
         const decelerationFactor = 1 - friction;
-        const initialScroll = container.scrollLeft;
+        const initialScroll = scrolled;
         const { finalScroll } = getFinalScroll(
           initialScroll,
           state.velocityX,
@@ -2516,7 +2612,8 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       const state = scrollStateRef.current;
       state.cachedScrollWidth = container.scrollWidth;
       state.cachedOffsetWidth = container.offsetWidth;
-      state.scrollLeft = container.scrollLeft;
+      state.inlineSign = getInlineSign(container);
+      state.scrollLeft = getScrollOffset(container);
       const minVelocity = 0.00001;
       const decelerationFactor = computeMomentumDecelerationFactor(
         container,
@@ -2533,7 +2630,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         // round the DOM scrollLeft property, we have to keep our own state in
         // order for the final scroll not to drift from the predicted value
         state.scrollLeft -= state.velocityX * FRAME_DURATION;
-        container2.scrollLeft = state.scrollLeft;
+        setScrollOffset(container2, state.scrollLeft);
         // keeps state.scrollLeft in sync with the position we land on, so the
         // momentum carries on across the jump
         wrapLoopScroll();
@@ -2558,7 +2655,9 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
             // we have to translate the items instead of the content because
             // Safari scrolls the viewport if the content is translated
             const theoreticalTranslate =
-              state.velocityX * RUBBER_BAND_BOUNCE_COEFFICIENT;
+              state.velocityX *
+              RUBBER_BAND_BOUNCE_COEFFICIENT *
+              state.inlineSign;
             const clampedTranslate =
               Math.sign(theoreticalTranslate) *
               Math.min(
@@ -2630,12 +2729,13 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
             // Sending it on to the same place, a copy along, keeps the journey
             // and lands it where it was always going.
             scrollStateRef.current.focusScrollDestination = heading + wrapped;
-            container.scrollTo({
-              left: heading + wrapped,
-              behavior: resolveScrollBehavior("smooth", scrollStateRef.current),
-            });
+            scrollToOffset(
+              container,
+              heading + wrapped,
+              resolveScrollBehavior("smooth", scrollStateRef.current),
+            );
           }
-          scrollStateRef.current.lastScrollLeft = container.scrollLeft;
+          scrollStateRef.current.lastScrollLeft = getScrollOffset(container);
           updateScrollState();
           clearTimeout(idleTimeout);
           idleTimeout = setTimeout(handleScrollIdle, SCROLL_IDLE_DELAY);
@@ -2653,6 +2753,29 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
           childList: true,
           subtree: true,
         });
+        // A `dir` flipped on an ancestor moves nothing the observers above can
+        // see, yet the content fade is drawn in physical terms and has to
+        // change sides with it. Only that one attribute is watched, so the
+        // rest of the page can mutate as much as it likes for free.
+        //
+        // An observer does not reach into shadow trees, so a carousel rendered
+        // inside one has its ancestors spread over several: each shadow root
+        // on the way up is watched, then the document.
+        const directionObserver = new MutationObserver(handleContentChange);
+        const watchDir = {
+          attributes: true,
+          attributeFilter: ["dir"],
+          subtree: true,
+        };
+        let root = container.getRootNode();
+        while (root instanceof ShadowRoot) {
+          directionObserver.observe(root, watchDir);
+          root = root.host.getRootNode();
+        }
+        directionObserver.observe(
+          container.ownerDocument.documentElement,
+          watchDir,
+        );
         container.addEventListener("scroll", handleScroll);
         // The custom properties this measures for cannot be written yet: the
         // root is committed after us and has no element to take them. It sets
@@ -2661,6 +2784,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
         return () => {
           resizeObserver.disconnect();
           mutationObserver.disconnect();
+          directionObserver.disconnect();
           clearTimeout(idleTimeout);
           container.removeEventListener("scroll", handleScroll);
         };
@@ -2760,9 +2884,13 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
             // re-snaps whatever is set on it, and taking snapping off for the
             // write does not help either, since handing it back snaps the
             // position just the same. What it can do is not make things worse.
-            container.scrollLeft = tab.backwards
-              ? Math.min(tab.scrollLeft, container.scrollLeft)
-              : Math.max(tab.scrollLeft, container.scrollLeft);
+            const scrolled = getScrollOffset(container);
+            setScrollOffset(
+              container,
+              tab.backwards
+                ? Math.min(tab.scrollLeft, scrolled)
+                : Math.max(tab.scrollLeft, scrolled),
+            );
             // Tabbing in from outside lands on whatever comes first in the
             // DOM, which after any amount of scrolling is somewhere back at the
             // beginning — and going to fetch it drags the carousel all the way
@@ -2789,14 +2917,14 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
                 ? onScreen[onScreen.length - 1]
                 : onScreen[0];
               if (candidate && candidate !== target) {
-                const held = container.scrollLeft;
+                const held = getScrollOffset(container);
                 focusWithoutScrolling(candidate);
                 // Firefox goes to fetch the element that first took the focus
                 // after handing us the event rather than before it, so the
                 // position it was told about has to be held for a frame.
                 requestAnimationFrame(() => {
-                  if (Math.abs(container.scrollLeft - held) > 1) {
-                    container.scrollLeft = held;
+                  if (Math.abs(getScrollOffset(container) - held) > 1) {
+                    setScrollOffset(container, held);
                   }
                 });
                 return;
@@ -2839,7 +2967,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
       const handleKeyDown = (event: KeyboardEvent) => {
         if (event.key === "Tab") {
           lastTab.current = {
-            scrollLeft: container.scrollLeft,
+            scrollLeft: getScrollOffset(container),
             backwards: event.shiftKey,
           };
         }
@@ -2958,7 +3086,7 @@ const CarouselViewport = forwardRef<HTMLDivElement, CarouselViewportProps>(
                   [CSS_VARS.fadeOffsetBackwards]: `min(var(${CSS_VARS.remainingBackwards}, 0px), 0px)`,
                   [CSS_VARS.fadeOffsetForwards]: `min(var(${CSS_VARS.remainingForwards}, 0px), 0px)`,
                   maskImage: `linear-gradient(
-              to right,
+              to ${isRtl ? "left" : "right"},
               transparent var(${CSS_VARS.fadeOffsetBackwards}),
               #000 calc(min(var(${CSS_VARS.remainingBackwards}, 0px), var(${CSS_VARS.fadeSize})) + var(${CSS_VARS.fadeOffsetBackwards})),
               #000 calc(100% - min(var(${CSS_VARS.remainingForwards}, 0px), var(${CSS_VARS.fadeSize})) - var(${CSS_VARS.fadeOffsetForwards})),
@@ -3068,14 +3196,14 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
           // The copies have just gone from under the scroll position. Whatever
           // the user was looking at is still here — once — so put the scroll at
           // the matching spot in what is left, and nothing appears to move.
-          const origin = getOffsetLeft(first, viewport);
+          const origin = getInlineOffset(first, viewport);
           const { naturalWidth } = metrics;
           const withinCopy =
             ((((scrollStateRef?.current?.lastScrollLeft ?? 0) - origin) %
               naturalWidth) +
               naturalWidth) %
             naturalWidth;
-          setLoopScrollLeft(viewport, origin + withinCopy, {
+          setLoopScrollOffset(viewport, origin + withinCopy, {
             reselectSnapTarget: true,
           });
         }
@@ -3094,7 +3222,7 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
       // looping on the scroll has not been touched yet: this is the last chance
       // to see where the user was.
       if (scrollLeftBeforeCopiesRef.current === null) {
-        scrollLeftBeforeCopiesRef.current = viewport.scrollLeft;
+        scrollLeftBeforeCopiesRef.current = getScrollOffset(viewport);
       }
 
       const settle = () => {
@@ -3121,7 +3249,7 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
           // the scroll is at nought, which lands on the first original child —
           // it opens the middle set. Doing this in a layout effect means the
           // browser paints the carousel there, no scrolling is ever shown.
-          setLoopScrollLeft(
+          setLoopScrollOffset(
             viewport,
             (scrollLeftBeforeCopiesRef.current ?? 0) + metrics.setWidth,
             { reselectSnapTarget: true },
@@ -3134,9 +3262,10 @@ const CarouselContent = forwardRef<HTMLDivElement, CarouselContentProps>(
         ) {
           // The content changed shape under us: the position we were on may no
           // longer have content on both sides of it, so take it back home.
-          setLoopScrollLeft(
+          const scrolled = getScrollOffset(viewport);
+          setLoopScrollOffset(
             viewport,
-            viewport.scrollLeft - getLoopShift(viewport.scrollLeft, metrics),
+            scrolled - getLoopShift(scrolled, metrics),
             { reselectSnapTarget: true },
           );
         }
